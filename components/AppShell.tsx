@@ -1,0 +1,131 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+
+const navItems = [
+  { href: "/", label: "Dashboard" },
+  { href: "/products", label: "Products" },
+  { href: "/stock", label: "Stock" },
+  { href: "/orders", label: "Orders" },
+  { href: "/deposits", label: "Deposits" },
+  { href: "/withdrawals", label: "Withdrawals" },
+  { href: "/usdt", label: "USDT" },
+  { href: "/users", label: "Users" },
+  { href: "/reports", label: "Reports" },
+  { href: "/settings", label: "Settings" }
+];
+
+export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [role, setRole] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      const session = data.session;
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+      setEmail(session.user.email ?? null);
+      setUserId(session.user.id);
+      const { data: adminRow, error } = await supabase
+        .from("admin_users")
+        .select("role")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      if (error) {
+        setAccessError(error.message);
+        setAccessDenied(true);
+      } else if (!adminRow) {
+        setAccessDenied(true);
+      } else {
+        setRole(adminRow.role);
+      }
+      setLoading(false);
+    };
+
+    loadSession();
+  }, [router]);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.replace("/login");
+  };
+
+  if (loading) {
+    return (
+      <div className="main">
+        <div className="card">Đang tải phiên đăng nhập...</div>
+      </div>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <div className="main">
+        <div className="card">
+          <h2 className="section-title">Không có quyền truy cập</h2>
+          <p className="muted">Tài khoản này chưa được cấp quyền admin.</p>
+          {userId && (
+            <p className="muted" style={{ marginTop: 8 }}>
+              User ID: {userId}
+            </p>
+          )}
+          {accessError && (
+            <p className="muted" style={{ marginTop: 8, color: "var(--danger)" }}>
+              Lỗi RLS: {accessError}
+            </p>
+          )}
+          <button className="button secondary" style={{ marginTop: 12 }} onClick={handleSignOut}>
+            Đăng xuất
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">Shop Admin</div>
+        <div className="nav">
+          {navItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`nav-link ${pathname === item.href ? "active" : ""}`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+        <div className="card" style={{ boxShadow: "none" }}>
+          <div className="muted">Đăng nhập</div>
+          <div style={{ fontFamily: "var(--font-sans)", fontSize: 13 }}>
+            {email ?? "admin"}
+          </div>
+          <div style={{ marginTop: 6 }} className="badge">
+            {role ?? "admin"}
+          </div>
+          <button className="button secondary" style={{ marginTop: 12 }} onClick={handleSignOut}>
+            Đăng xuất
+          </button>
+        </div>
+      </aside>
+      <main className="main">
+        {children}
+      </main>
+    </div>
+  );
+}
