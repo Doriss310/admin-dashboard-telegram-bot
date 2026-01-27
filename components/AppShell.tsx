@@ -10,6 +10,7 @@ const navItems = [
   { href: "/products", label: "Products" },
   { href: "/stock", label: "Stock" },
   { href: "/orders", label: "Orders" },
+  { href: "/direct-orders", label: "Direct Orders" },
   { href: "/deposits", label: "Deposits" },
   { href: "/withdrawals", label: "Withdrawals" },
   { href: "/usdt", label: "USDT" },

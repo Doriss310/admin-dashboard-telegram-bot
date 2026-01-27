@@ -15,6 +15,9 @@ interface UserRow {
 export default function UsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [search, setSearch] = useState("");
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
 
   const load = async () => {
     const { data } = await supabase
@@ -33,6 +36,55 @@ export default function UsersPage() {
     if (!search) return users;
     return users.filter((user) => user.user_id.toString().includes(search));
   }, [search, users]);
+
+  const sendMessageRequest = async (payload: { message: string; userId?: number; broadcast?: boolean }) => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) {
+      setStatus("Chưa đăng nhập.");
+      return;
+    }
+    setSending(true);
+    setStatus(null);
+    try {
+      const res = await fetch("/api/telegram/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        setStatus(result.error || "Gửi thất bại.");
+        return;
+      }
+      if (payload.broadcast) {
+        setStatus(`✅ Đã gửi ${result.success}/${result.total}.`);
+      } else {
+        setStatus(`✅ Đã gửi cho user ${payload.userId}.`);
+      }
+    } catch (error) {
+      setStatus("Gửi thất bại.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleBroadcast = async () => {
+    const message = broadcastMessage.trim();
+    if (!message) return;
+    if (!confirm("Gửi tin nhắn cho TẤT CẢ user đã nhắn bot?")) return;
+    await sendMessageRequest({ message, broadcast: true });
+    setBroadcastMessage("");
+  };
+
+  const handleSendToUser = async (user: UserRow) => {
+    const message = prompt(`Nhập nội dung gửi cho user ${user.user_id}`);
+    if (!message) return;
+    await sendMessageRequest({ message, userId: user.user_id });
+  };
 
   return (
     <div className="grid" style={{ gap: 24 }}>
@@ -55,6 +107,22 @@ export default function UsersPage() {
       </div>
 
       <div className="card">
+        <h3 className="section-title">Gửi tin nhắn cho tất cả user</h3>
+        <div className="form-grid">
+          <textarea
+            className="textarea"
+            placeholder="Nhập nội dung gửi cho tất cả user đã nhắn bot"
+            value={broadcastMessage}
+            onChange={(event) => setBroadcastMessage(event.target.value)}
+          />
+          <button className="button" type="button" disabled={sending} onClick={handleBroadcast}>
+            {sending ? "Đang gửi..." : "Gửi tất cả"}
+          </button>
+        </div>
+        {status && <p className="muted" style={{ marginTop: 8 }}>{status}</p>}
+      </div>
+
+      <div className="card">
         <table className="table">
           <thead>
             <tr>
@@ -64,6 +132,7 @@ export default function UsersPage() {
               <th>Balance (USDT)</th>
               <th>Lang</th>
               <th>Created</th>
+              <th>Hành động</th>
             </tr>
           </thead>
           <tbody>
@@ -75,11 +144,16 @@ export default function UsersPage() {
                 <td>{user.balance_usdt?.toString() ?? "0"}</td>
                 <td>{user.language ?? "vi"}</td>
                 <td>{user.created_at ? new Date(user.created_at).toLocaleString() : "-"}</td>
+                <td>
+                  <button className="button secondary" disabled={sending} onClick={() => handleSendToUser(user)}>
+                    Nhắn tin
+                  </button>
+                </td>
               </tr>
             ))}
             {!filtered.length && (
               <tr>
-                <td colSpan={6} className="muted">Chưa có dữ liệu.</td>
+                <td colSpan={7} className="muted">Chưa có dữ liệu.</td>
               </tr>
             )}
           </tbody>
