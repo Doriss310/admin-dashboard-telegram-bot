@@ -15,7 +15,7 @@ interface DirectOrderRow {
   created_at: string;
   products?: {
     name: string;
-  } | null;
+  }[] | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -40,7 +40,7 @@ export default function DirectOrdersPage() {
       query = query.eq("status", statusFilter);
     }
     const { data } = await query;
-    setOrders((data as DirectOrderRow[]) || []);
+    setOrders(((data as unknown) as DirectOrderRow[]) || []);
   };
 
   useEffect(() => {
@@ -135,7 +135,7 @@ export default function DirectOrdersPage() {
               <tr key={order.id}>
                 <td>#{order.id}</td>
                 <td>{order.user_id}</td>
-                <td>{order.products?.name ?? order.product_id}</td>
+                <td>{order.products?.[0]?.name ?? order.product_id}</td>
                 <td>{order.quantity}</td>
                 <td>{order.unit_price?.toLocaleString?.() ?? order.unit_price}</td>
                 <td>{order.amount?.toLocaleString?.() ?? order.amount}</td>
