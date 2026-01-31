@@ -36,6 +36,11 @@ export default function ProductsPage() {
   const [deleteProduct, setDeleteProduct] = useState<Product | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [templatePattern, setTemplatePattern] = useState("");
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<FormatTemplate | null>(null);
+  const [editTemplateName, setEditTemplateName] = useState("");
+  const [editTemplatePattern, setEditTemplatePattern] = useState("");
 
   const load = async () => {
     const { data } = await supabase
@@ -46,7 +51,14 @@ export default function ProductsPage() {
   };
 
   const loadFormats = async () => {
-    const { data } = await supabase.from("format_templates").select("id, name, pattern").order("id");
+    const { data, error } = await supabase
+      .from("format_templates")
+      .select("id, name, pattern")
+      .order("id");
+    if (error) {
+      setTemplateError(error.message);
+      return;
+    }
     setFormatTemplates((data as FormatTemplate[]) || []);
   };
 
@@ -129,18 +141,65 @@ export default function ProductsPage() {
 
   const handleAddTemplate = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!templateName || !templatePattern) return;
-    await supabase.from("format_templates").insert({
-      name: templateName,
-      pattern: templatePattern
+    const nameValue = templateName.trim();
+    const patternValue = templatePattern.trim();
+    if (!nameValue || !patternValue) return;
+    setTemplateError(null);
+    setTemplateSaving(true);
+    const { error } = await supabase.from("format_templates").insert({
+      name: nameValue,
+      pattern: patternValue
     });
+    setTemplateSaving(false);
+    if (error) {
+      setTemplateError(error.message);
+      return;
+    }
     setTemplateName("");
     setTemplatePattern("");
     await loadFormats();
   };
 
   const handleDeleteTemplate = async (templateId: number) => {
-    await supabase.from("format_templates").delete().eq("id", templateId);
+    setTemplateError(null);
+    const { error } = await supabase.from("format_templates").delete().eq("id", templateId);
+    if (error) {
+      setTemplateError(error.message);
+      return;
+    }
+    await loadFormats();
+  };
+
+  const startEditTemplate = (template: FormatTemplate) => {
+    setEditingTemplate(template);
+    setEditTemplateName(template.name);
+    setEditTemplatePattern(template.pattern);
+  };
+
+  const cancelEditTemplate = () => {
+    setEditingTemplate(null);
+    setEditTemplateName("");
+    setEditTemplatePattern("");
+  };
+
+  const handleUpdateTemplate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingTemplate) return;
+    const nameValue = editTemplateName.trim();
+    const patternValue = editTemplatePattern.trim();
+    if (!nameValue || !patternValue) return;
+    setTemplateError(null);
+    setTemplateSaving(true);
+    const { error } = await supabase
+      .from("format_templates")
+      .update({ name: nameValue, pattern: patternValue })
+      .eq("id", editingTemplate.id);
+    setTemplateSaving(false);
+    if (error) {
+      setTemplateError(error.message);
+      return;
+    }
+    cancelEditTemplate();
     await loadFormats();
   };
 
@@ -248,8 +307,15 @@ export default function ProductsPage() {
               onChange={(e) => setTemplatePattern(e.target.value)}
               required
             />
-            <button className="button" type="submit">Thêm format</button>
+            <button className="button" type="submit" disabled={templateSaving}>
+              {templateSaving ? "Đang thêm..." : "Thêm format"}
+            </button>
           </form>
+          {templateError && (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Lỗi: {templateError}
+            </p>
+          )}
           <table className="table" style={{ marginTop: 16 }}>
             <thead>
               <tr>
@@ -266,6 +332,7 @@ export default function ProductsPage() {
                   <td>{format.name}</td>
                   <td>{format.pattern}</td>
                   <td>
+                    <button className="button secondary" onClick={() => startEditTemplate(format)}>Chỉnh sửa</button>
                     <button className="button danger" onClick={() => handleDeleteTemplate(format.id)}>Xóa</button>
                   </td>
                 </tr>
@@ -310,6 +377,38 @@ export default function ProductsPage() {
               <div className="modal-actions">
                 <button className="button" type="submit">Lưu</button>
                 <button className="button secondary" type="button" onClick={cancelEdit}>Hủy</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editingTemplate && (
+        <div className="modal-backdrop" onClick={cancelEditTemplate}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <h3 className="section-title">Chỉnh sửa format #{editingTemplate.id}</h3>
+            <form className="form-grid" onSubmit={handleUpdateTemplate}>
+              <input
+                className="input"
+                placeholder="Tên format (VD: Adobe)"
+                value={editTemplateName}
+                onChange={(e) => setEditTemplateName(e.target.value)}
+                required
+              />
+              <input
+                className="input"
+                placeholder="Format data (VD: Mail|Pass|Token)"
+                value={editTemplatePattern}
+                onChange={(e) => setEditTemplatePattern(e.target.value)}
+                required
+              />
+              <div className="modal-actions">
+                <button className="button" type="submit" disabled={templateSaving}>
+                  {templateSaving ? "Đang lưu..." : "Lưu"}
+                </button>
+                <button className="button secondary" type="button" onClick={cancelEditTemplate}>
+                  Hủy
+                </button>
               </div>
             </form>
           </div>
