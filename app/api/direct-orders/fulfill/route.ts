@@ -68,14 +68,14 @@ const formatDescriptionBlock = (description: string | null | undefined, label = 
 
 const buildFormattedItems = (items: string[], formatData?: string | null, html = false) => {
   const labels = (formatData || "")
-    .split("|")
+    .split(",")
     .map((label) => label.trim())
     .filter(Boolean);
   if (!labels.length) {
     return items.map((item) => (html ? `<code>${item}</code>` : item));
   }
   return items.map((item) => {
-    const values = item.split("|").map((value) => value.trim());
+    const values = item.split(",").map((value) => value.trim());
     const lines = labels.map((label, idx) => {
       const value = values[idx] ?? "";
       if (html) {

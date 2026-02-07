@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 
 interface UserRow {
@@ -80,12 +81,6 @@ export default function UsersPage() {
     setBroadcastMessage("");
   };
 
-  const handleSendToUser = async (user: UserRow) => {
-    const message = prompt(`Nhập nội dung gửi cho user ${user.user_id}`);
-    if (!message) return;
-    await sendMessageRequest({ message, userId: user.user_id });
-  };
-
   return (
     <div className="grid" style={{ gap: 24 }}>
       <div className="topbar">
@@ -145,9 +140,9 @@ export default function UsersPage() {
                 <td>{user.language ?? "vi"}</td>
                 <td>{user.created_at ? new Date(user.created_at).toLocaleString() : "-"}</td>
                 <td>
-                  <button className="button secondary" disabled={sending} onClick={() => handleSendToUser(user)}>
+                  <Link className="button secondary" href={`/users/${user.user_id}`}>
                     Nhắn tin
-                  </button>
+                  </Link>
                 </td>
               </tr>
             ))}

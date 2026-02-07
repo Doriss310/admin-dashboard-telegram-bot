@@ -62,12 +62,17 @@ const sendTelegramMessage = async (chatId: number, text: string) => {
     })
   });
 
-  if (!response.ok) {
-    return false;
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload || payload.ok !== true || !payload.result) {
+    return { ok: false as const };
   }
-
-  const payload = await response.json();
-  return payload.ok === true;
+  const result = payload.result as { message_id?: number; date?: number; text?: string };
+  return {
+    ok: true as const,
+    message_id: typeof result.message_id === "number" ? result.message_id : null,
+    date: typeof result.date === "number" ? result.date : null,
+    text: typeof result.text === "string" ? result.text : text
+  };
 };
 
 export async function POST(request: NextRequest) {
@@ -139,9 +144,27 @@ export async function POST(request: NextRequest) {
   let success = 0;
   let failed = 0;
   for (const chatId of targets) {
-    const ok = await sendTelegramMessage(chatId, trimmedMessage);
-    if (ok) {
+    const result = await sendTelegramMessage(chatId, trimmedMessage);
+    if (result.ok) {
       success += 1;
+
+      // Best-effort logging to support admin 1-1 chat history UI.
+      // Avoid logging broadcasts here to prevent huge inserts + extra latency.
+      if (!broadcast && result.message_id) {
+        const sentAt = result.date ? new Date(result.date * 1000).toISOString() : new Date().toISOString();
+        await supabase.from("telegram_messages").upsert(
+          {
+            chat_id: chatId,
+            message_id: result.message_id,
+            direction: "out",
+            message_type: "text",
+            text: result.text ?? trimmedMessage,
+            payload: null,
+            sent_at: sentAt
+          },
+          { onConflict: "chat_id,message_id" }
+        );
+      }
     } else {
       failed += 1;
     }

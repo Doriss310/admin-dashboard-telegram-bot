@@ -242,7 +242,7 @@ export default function ProductsPage() {
           </select>
           <input
             className="input"
-            placeholder="Format data (VD: Mail|Pass|Token)"
+            placeholder="Format data (VD: Mail,Pass,Token)"
             value={formatData}
             onChange={(e) => setFormatData(e.target.value)}
           />
@@ -302,7 +302,7 @@ export default function ProductsPage() {
             />
             <input
               className="input"
-              placeholder="Format data (VD: Mail|Pass|Token)"
+              placeholder="Format data (VD: Mail,Pass,Token)"
               value={templatePattern}
               onChange={(e) => setTemplatePattern(e.target.value)}
               required
@@ -370,7 +370,7 @@ export default function ProductsPage() {
               </select>
               <input
                 className="input"
-                placeholder="Format data (VD: Mail|Pass|Token)"
+                placeholder="Format data (VD: Mail,Pass,Token)"
                 value={editFormatData}
                 onChange={(e) => setEditFormatData(e.target.value)}
               />
@@ -397,7 +397,7 @@ export default function ProductsPage() {
               />
               <input
                 className="input"
-                placeholder="Format data (VD: Mail|Pass|Token)"
+                placeholder="Format data (VD: Mail,Pass,Token)"
                 value={editTemplatePattern}
                 onChange={(e) => setEditTemplatePattern(e.target.value)}
                 required
