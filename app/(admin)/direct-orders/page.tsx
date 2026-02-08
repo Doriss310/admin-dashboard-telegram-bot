@@ -21,7 +21,8 @@ interface DirectOrderRow {
 const STATUS_LABELS: Record<string, string> = {
   pending: "Chờ xử lý",
   confirmed: "Đã duyệt",
-  failed: "Thất bại"
+  failed: "Thất bại",
+  cancelled: "Đã hủy"
 };
 
 export default function DirectOrdersPage() {
@@ -107,6 +108,7 @@ export default function DirectOrdersPage() {
             <option value="pending">Chờ xử lý</option>
             <option value="confirmed">Đã duyệt</option>
             <option value="failed">Thất bại</option>
+            <option value="cancelled">Đã hủy</option>
             <option value="all">Tất cả</option>
           </select>
         </div>

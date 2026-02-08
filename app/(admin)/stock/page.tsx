@@ -15,11 +15,18 @@ interface StockItem {
   sold: boolean;
 }
 
+interface StockSummary {
+  total: number;
+  sold: number;
+  remaining: number;
+}
+
 export default function StockPage() {
   const PAGE_SIZE = 100;
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [stockSummary, setStockSummary] = useState<StockSummary>({ total: 0, sold: 0, remaining: 0 });
   const [content, setContent] = useState("");
   const [stockFormTab, setStockFormTab] = useState<"add" | "delete">("add");
   const [deleteContent, setDeleteContent] = useState("");
@@ -63,6 +70,34 @@ export default function StockPage() {
     setTotalCount(count ?? 0);
   };
 
+  const loadStockSummary = async (productId: string) => {
+    if (!productId) {
+      setStockSummary({ total: 0, sold: 0, remaining: 0 });
+      return;
+    }
+
+    const numericProductId = Number(productId);
+    const [totalRes, soldRes] = await Promise.all([
+      supabase
+        .from("stock")
+        .select("id", { count: "exact", head: true })
+        .eq("product_id", numericProductId),
+      supabase
+        .from("stock")
+        .select("id", { count: "exact", head: true })
+        .eq("product_id", numericProductId)
+        .eq("sold", true)
+    ]);
+
+    const total = totalRes.count ?? 0;
+    const sold = soldRes.count ?? 0;
+    setStockSummary({
+      total,
+      sold,
+      remaining: Math.max(total - sold, 0)
+    });
+  };
+
   useEffect(() => {
     loadProducts();
   }, []);
@@ -71,6 +106,7 @@ export default function StockPage() {
     if (!selectedProductId) {
       setStockItems([]);
       setTotalCount(0);
+      setStockSummary({ total: 0, sold: 0, remaining: 0 });
       setSelectedStockIds(new Set());
       return;
     }
@@ -83,6 +119,11 @@ export default function StockPage() {
       loadStock(selectedProductId, page);
     }
   }, [selectedProductId, page]);
+
+  useEffect(() => {
+    if (!selectedProductId) return;
+    loadStockSummary(selectedProductId);
+  }, [selectedProductId]);
 
   useEffect(() => {
     // Selection is scoped to the current page and product filter for predictable bulk actions.
@@ -132,6 +173,7 @@ export default function StockPage() {
 
     await supabase.from("stock").insert(payload);
     setContent("");
+    await loadStockSummary(selectedProductId);
     if (page === 1) {
       await loadStock(selectedProductId, 1);
     } else {
@@ -175,6 +217,7 @@ export default function StockPage() {
     setBulkEditOpen(false);
     setBulkSoldAction("keep");
     setSelectedStockIds(new Set());
+    await loadStockSummary(selectedProductId);
     await loadStock(selectedProductId, page);
   };
 
@@ -187,6 +230,7 @@ export default function StockPage() {
     setBulkBusy(false);
     setBulkDeleteOpen(false);
     setSelectedStockIds(new Set());
+    await loadStockSummary(selectedProductId);
     const removedOnPage = stockItems.filter((item) => ids.includes(item.id)).length;
     const shouldGoPrev = removedOnPage === stockItems.length && page > 1;
     if (shouldGoPrev) setPage(page - 1);
@@ -239,6 +283,7 @@ export default function StockPage() {
       setDeleteByTextPlan(null);
       setDeleteContent("");
       setSelectedStockIds(new Set());
+      await loadStockSummary(selectedProductId);
       if (page === 1) await loadStock(selectedProductId, 1);
       else setPage(1);
     } finally {
@@ -268,12 +313,14 @@ export default function StockPage() {
       .update({ content: cleaned, sold: editSold })
       .eq("id", editingStock.id);
     cancelEdit();
+    await loadStockSummary(selectedProductId);
     await loadStock(selectedProductId, page);
   };
 
   const handleDeleteConfirm = async () => {
     if (!deleteStock) return;
     await supabase.from("stock").delete().eq("id", deleteStock.id);
+    await loadStockSummary(selectedProductId);
     const shouldGoPrev = stockItems.length === 1 && page > 1;
     setDeleteStock(null);
     if (shouldGoPrev) {
@@ -308,6 +355,22 @@ export default function StockPage() {
             ))}
           </select>
         </div>
+        {selectedProductId && (
+          <div className="grid stats" style={{ marginTop: 12 }}>
+            <div className="card" style={{ boxShadow: "none", padding: 14 }}>
+              <p className="muted">Tổng</p>
+              <h2>{stockSummary.total.toLocaleString("vi-VN")}</h2>
+            </div>
+            <div className="card" style={{ boxShadow: "none", padding: 14 }}>
+              <p className="muted">Đã bán</p>
+              <h2>{stockSummary.sold.toLocaleString("vi-VN")}</h2>
+            </div>
+            <div className="card" style={{ boxShadow: "none", padding: 14 }}>
+              <p className="muted">Còn lại</p>
+              <h2>{stockSummary.remaining.toLocaleString("vi-VN")}</h2>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="card">

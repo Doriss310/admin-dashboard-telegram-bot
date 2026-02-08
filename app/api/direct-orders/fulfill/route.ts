@@ -5,6 +5,11 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const botToken = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || "";
 const MAX_MESSAGE_LENGTH = 4096;
+const rawExpireMinutes = Number(process.env.DIRECT_ORDER_PENDING_EXPIRE_MINUTES || "10");
+const DIRECT_ORDER_PENDING_EXPIRE_MINUTES = Number.isFinite(rawExpireMinutes)
+  ? Math.max(1, rawExpireMinutes)
+  : 10;
+const DIRECT_ORDER_PENDING_EXPIRE_MS = DIRECT_ORDER_PENDING_EXPIRE_MINUTES * 60 * 1000;
 
 const buildSupabaseClient = (token?: string) =>
   createClient(supabaseUrl, supabaseAnonKey, {
@@ -87,6 +92,13 @@ const buildFormattedItems = (items: string[], formatData?: string | null, html =
   });
 };
 
+const isDirectOrderExpired = (createdAt: string | null | undefined) => {
+  if (!createdAt) return false;
+  const created = new Date(createdAt);
+  if (Number.isNaN(created.getTime())) return false;
+  return Date.now() - created.getTime() >= DIRECT_ORDER_PENDING_EXPIRE_MS;
+};
+
 export async function POST(request: NextRequest) {
   if (!supabaseUrl || !supabaseAnonKey) {
     return NextResponse.json({ error: "Supabase env missing." }, { status: 500 });
@@ -142,6 +154,17 @@ export async function POST(request: NextRequest) {
 
   if (directOrder.status !== "pending") {
     return NextResponse.json({ error: "Order already processed." }, { status: 400 });
+  }
+
+  if (isDirectOrderExpired(directOrder.created_at)) {
+    await supabase
+      .from("direct_orders")
+      .update({ status: "cancelled" })
+      .eq("id", directOrder.id);
+    return NextResponse.json(
+      { error: `Order expired after ${DIRECT_ORDER_PENDING_EXPIRE_MINUTES} minutes.` },
+      { status: 409 }
+    );
   }
 
   const { data: product } = await supabase
