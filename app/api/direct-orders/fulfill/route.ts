@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
 
   const { data: directOrder, error: directOrderError } = await supabase
     .from("direct_orders")
-    .select("id, user_id, product_id, quantity, unit_price, amount, code, status, created_at")
+    .select("id, user_id, product_id, quantity, bonus_quantity, unit_price, amount, code, status, created_at")
     .eq("id", orderId)
     .maybeSingle();
 
@@ -173,15 +173,21 @@ export async function POST(request: NextRequest) {
     .eq("id", directOrder.product_id)
     .maybeSingle();
 
+  const bonusQuantity = Number(directOrder.bonus_quantity || 0);
+  const deliverQuantity = Math.max(
+    1,
+    Number(directOrder.quantity || 0) + (bonusQuantity > 0 ? bonusQuantity : 0)
+  );
+
   const { data: stockRows, error: stockError } = await supabase
     .from("stock")
     .select("id, content")
     .eq("product_id", directOrder.product_id)
     .eq("sold", false)
     .order("id", { ascending: true })
-    .limit(directOrder.quantity);
+    .limit(deliverQuantity);
 
-  if (stockError || !stockRows || stockRows.length < directOrder.quantity) {
+  if (stockError || !stockRows || stockRows.length < deliverQuantity) {
     await supabase
       .from("direct_orders")
       .update({ status: "failed" })
@@ -202,7 +208,7 @@ export async function POST(request: NextRequest) {
   }
 
   const orderGroup = `MANUAL${directOrder.user_id}${new Date().toISOString().replace(/[-:.TZ]/g, "")}`;
-  const totalPrice = (directOrder.unit_price || 0) * items.length;
+  const totalPrice = Number(directOrder.amount || 0) || (Number(directOrder.unit_price || 0) * Number(directOrder.quantity || 0));
 
   const { error: createOrderError } = await supabase.from("orders").insert({
     user_id: directOrder.user_id,
@@ -236,17 +242,22 @@ export async function POST(request: NextRequest) {
     `✅ Thanh toán thành công!\n\n` +
     `🧾 ${productName} | SL: ${items.length}\n` +
     `💰 Tổng: ${totalText}`;
+  const bonusLine = bonusQuantity > 0 ? `\n🎁 Tặng thêm: ${bonusQuantity}` : "";
 
   const itemsFormatted = buildFormattedItems(items, product?.format_data, true).join("\n\n");
-  const messageText = `${successText}\n\n${descriptionBlock}🔐 Account:\n${itemsFormatted}`.slice(0, MAX_MESSAGE_LENGTH);
+  const messageText = `${successText}${bonusLine}\n\n${descriptionBlock}🔐 Account:\n${itemsFormatted}`.slice(0, MAX_MESSAGE_LENGTH);
 
   let sent = false;
   if (items.length > 5 || messageText.length >= MAX_MESSAGE_LENGTH - 50) {
     const headerLines = [
       `Product: ${productName}`,
       `Qty: ${items.length}`,
+      `Paid Qty: ${directOrder.quantity}`,
       `Total: ${totalText}`
     ];
+    if (bonusQuantity > 0) {
+      headerLines.push(`Bonus: ${bonusQuantity}`);
+    }
     if (description) {
       headerLines.push(`Description: ${description}`);
     }

@@ -294,6 +294,44 @@ p {
   grid-column: 1 / -1;
 }
 
+.pricing-box {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.75);
+}
+
+.pricing-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.pricing-head h4 {
+  font-size: 14px;
+}
+
+.tier-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tier-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.promo-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px;
+}
+
 .toggle-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -523,6 +561,14 @@ p {
 
 @media (max-width: 680px) {
   .chat-compose {
+    grid-template-columns: 1fr;
+  }
+
+  .tier-row {
+    grid-template-columns: 1fr;
+  }
+
+  .promo-row {
     grid-template-columns: 1fr;
   }
 }

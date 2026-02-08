@@ -3,11 +3,25 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
+interface PriceTier {
+  min_quantity: number;
+  unit_price: number;
+}
+
+interface PriceTierRow {
+  id: string;
+  minQuantity: string;
+  unitPrice: string;
+}
+
 interface Product {
   id: number;
   name: string;
   price: number;
   price_usdt: number;
+  price_tiers: PriceTier[] | null;
+  promo_buy_quantity: number | null;
+  promo_bonus_quantity: number | null;
   description: string | null;
   format_data: string | null;
 }
@@ -18,21 +32,65 @@ interface FormatTemplate {
   pattern: string;
 }
 
+const createTierRow = (tier?: PriceTier): PriceTierRow => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  minQuantity: tier?.min_quantity ? String(tier.min_quantity) : "",
+  unitPrice: tier?.unit_price ? String(tier.unit_price) : ""
+});
+
+const normalizeTierRows = (rows: PriceTierRow[]): PriceTier[] => {
+  const byQuantity = new Map<number, number>();
+  for (const row of rows) {
+    const minQuantity = Number(row.minQuantity);
+    const unitPrice = Number(row.unitPrice);
+    if (!Number.isFinite(minQuantity) || !Number.isFinite(unitPrice)) continue;
+    if (minQuantity < 1 || unitPrice < 1) continue;
+    byQuantity.set(Math.trunc(minQuantity), Math.trunc(unitPrice));
+  }
+  return Array.from(byQuantity.entries())
+    .map(([min_quantity, unit_price]) => ({ min_quantity, unit_price }))
+    .sort((a, b) => a.min_quantity - b.min_quantity);
+};
+
+const parseTierRows = (tiers: PriceTier[] | null | undefined): PriceTierRow[] => {
+  if (!tiers?.length) return [createTierRow()];
+  return tiers
+    .filter((tier) => Number(tier.min_quantity) > 0 && Number(tier.unit_price) > 0)
+    .sort((a, b) => a.min_quantity - b.min_quantity)
+    .map((tier) => createTierRow(tier));
+};
+
+const formatTierSummary = (tiers: PriceTier[] | null | undefined) => {
+  if (!tiers?.length) return "Mặc định theo giá cơ bản.";
+  return tiers
+    .slice()
+    .sort((a, b) => a.min_quantity - b.min_quantity)
+    .map((tier) => `Từ ${tier.min_quantity}: ${tier.unit_price.toLocaleString("vi-VN")}đ`)
+    .join(" | ");
+};
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [formatTemplates, setFormatTemplates] = useState<FormatTemplate[]>([]);
   const [role, setRole] = useState<string | null>(null);
+  const [productError, setProductError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [priceUsdt, setPriceUsdt] = useState("");
   const [description, setDescription] = useState("");
   const [formatData, setFormatData] = useState("");
+  const [priceTierRows, setPriceTierRows] = useState<PriceTierRow[]>([createTierRow()]);
+  const [promoBuyQuantity, setPromoBuyQuantity] = useState("");
+  const [promoBonusQuantity, setPromoBonusQuantity] = useState("");
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editPriceUsdt, setEditPriceUsdt] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editFormatData, setEditFormatData] = useState("");
+  const [editPriceTierRows, setEditPriceTierRows] = useState<PriceTierRow[]>([createTierRow()]);
+  const [editPromoBuyQuantity, setEditPromoBuyQuantity] = useState("");
+  const [editPromoBonusQuantity, setEditPromoBonusQuantity] = useState("");
   const [deleteProduct, setDeleteProduct] = useState<Product | null>(null);
   const [templateName, setTemplateName] = useState("");
   const [templatePattern, setTemplatePattern] = useState("");
@@ -43,10 +101,15 @@ export default function ProductsPage() {
   const [editTemplatePattern, setEditTemplatePattern] = useState("");
 
   const load = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("products")
-      .select("id, name, price, price_usdt, description, format_data")
+      .select("id, name, price, price_usdt, price_tiers, promo_buy_quantity, promo_bonus_quantity, description, format_data")
       .order("id");
+    if (error) {
+      setProductError(error.message);
+      return;
+    }
+    setProductError(null);
     setProducts((data as Product[]) || []);
   };
 
@@ -80,20 +143,70 @@ export default function ProductsPage() {
     loadRole();
   }, []);
 
+  const addTierRow = () => {
+    setPriceTierRows((prev) => [...prev, createTierRow()]);
+  };
+
+  const removeTierRow = (id: string) => {
+    setPriceTierRows((prev) => {
+      const next = prev.filter((row) => row.id !== id);
+      return next.length ? next : [createTierRow()];
+    });
+  };
+
+  const updateTierRow = (id: string, field: "minQuantity" | "unitPrice", value: string) => {
+    setPriceTierRows((prev) => prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
+  };
+
+  const addEditTierRow = () => {
+    setEditPriceTierRows((prev) => [...prev, createTierRow()]);
+  };
+
+  const removeEditTierRow = (id: string) => {
+    setEditPriceTierRows((prev) => {
+      const next = prev.filter((row) => row.id !== id);
+      return next.length ? next : [createTierRow()];
+    });
+  };
+
+  const updateEditTierRow = (id: string, field: "minQuantity" | "unitPrice", value: string) => {
+    setEditPriceTierRows((prev) => prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
+  };
+
   const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
-    await supabase.from("products").insert({
+    const tiers = normalizeTierRows(priceTierRows);
+    const buyQty = Number(promoBuyQuantity || "0");
+    const bonusQty = Number(promoBonusQuantity || "0");
+    const hasPromo = buyQty > 0 || bonusQty > 0;
+    if (hasPromo && (!Number.isFinite(buyQty) || !Number.isFinite(bonusQty) || buyQty < 1 || bonusQty < 1)) {
+      setProductError("Khuyến mãi cần đủ 2 giá trị hợp lệ: mua X và tặng Y đều phải lớn hơn 0.");
+      return;
+    }
+
+    const { error } = await supabase.from("products").insert({
       name,
       price: parseInt(price || "0", 10),
       price_usdt: parseFloat(priceUsdt || "0"),
       description,
-      format_data: formatData || null
+      format_data: formatData || null,
+      price_tiers: tiers.length ? tiers : null,
+      promo_buy_quantity: hasPromo ? Math.trunc(buyQty) : 0,
+      promo_bonus_quantity: hasPromo ? Math.trunc(bonusQty) : 0
     });
+    if (error) {
+      setProductError(error.message);
+      return;
+    }
+    setProductError(null);
     setName("");
     setPrice("");
     setPriceUsdt("");
     setDescription("");
     setFormatData("");
+    setPriceTierRows([createTierRow()]);
+    setPromoBuyQuantity("");
+    setPromoBonusQuantity("");
     await load();
   };
 
@@ -111,6 +224,9 @@ export default function ProductsPage() {
     setEditPriceUsdt(product.price_usdt?.toString() ?? "");
     setEditDescription(product.description ?? "");
     setEditFormatData(product.format_data ?? "");
+    setEditPriceTierRows(parseTierRows(product.price_tiers));
+    setEditPromoBuyQuantity(product.promo_buy_quantity ? product.promo_buy_quantity.toString() : "");
+    setEditPromoBonusQuantity(product.promo_bonus_quantity ? product.promo_bonus_quantity.toString() : "");
   };
 
   const cancelEdit = () => {
@@ -120,21 +236,41 @@ export default function ProductsPage() {
     setEditPriceUsdt("");
     setEditDescription("");
     setEditFormatData("");
+    setEditPriceTierRows([createTierRow()]);
+    setEditPromoBuyQuantity("");
+    setEditPromoBonusQuantity("");
   };
 
   const handleUpdate = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!editingProduct) return;
-    await supabase
+    const tiers = normalizeTierRows(editPriceTierRows);
+    const buyQty = Number(editPromoBuyQuantity || "0");
+    const bonusQty = Number(editPromoBonusQuantity || "0");
+    const hasPromo = buyQty > 0 || bonusQty > 0;
+    if (hasPromo && (!Number.isFinite(buyQty) || !Number.isFinite(bonusQty) || buyQty < 1 || bonusQty < 1)) {
+      setProductError("Khuyến mãi cần đủ 2 giá trị hợp lệ: mua X và tặng Y đều phải lớn hơn 0.");
+      return;
+    }
+
+    const { error } = await supabase
       .from("products")
       .update({
         name: editName,
         price: parseInt(editPrice || "0", 10),
         price_usdt: parseFloat(editPriceUsdt || "0"),
         description: editDescription,
-        format_data: editFormatData || null
+        format_data: editFormatData || null,
+        price_tiers: tiers.length ? tiers : null,
+        promo_buy_quantity: hasPromo ? Math.trunc(buyQty) : 0,
+        promo_bonus_quantity: hasPromo ? Math.trunc(bonusQty) : 0
       })
       .eq("id", editingProduct.id);
+    if (error) {
+      setProductError(error.message);
+      return;
+    }
+    setProductError(null);
     cancelEdit();
     await load();
   };
@@ -203,15 +339,6 @@ export default function ProductsPage() {
     await loadFormats();
   };
 
-  const handleUpdateUsdt = async (product: Product) => {
-    const value = prompt("Giá USDT mới", product.price_usdt?.toString() || "0");
-    if (value === null) return;
-    const parsed = parseFloat(value);
-    if (Number.isNaN(parsed)) return;
-    await supabase.from("products").update({ price_usdt: parsed }).eq("id", product.id);
-    await load();
-  };
-
   return (
     <div className="grid" style={{ gap: 24 }}>
       <div className="topbar">
@@ -246,8 +373,53 @@ export default function ProductsPage() {
             value={formatData}
             onChange={(e) => setFormatData(e.target.value)}
           />
+          <div className="form-section pricing-box">
+            <div className="pricing-head">
+              <h4>Giá theo số lượng (VND)</h4>
+              <button className="button secondary" type="button" onClick={addTierRow}>+ Thêm mức</button>
+            </div>
+            <p className="muted">Nhập mốc số lượng và đơn giá mỗi account. Hệ thống tự lấy mốc cao nhất phù hợp.</p>
+            <div className="tier-list">
+              {priceTierRows.map((row) => (
+                <div className="tier-row" key={row.id}>
+                  <input
+                    className="input"
+                    placeholder="Từ số lượng (VD: 10)"
+                    value={row.minQuantity}
+                    onChange={(event) => updateTierRow(row.id, "minQuantity", event.target.value)}
+                  />
+                  <input
+                    className="input"
+                    placeholder="Đơn giá VND (VD: 15000)"
+                    value={row.unitPrice}
+                    onChange={(event) => updateTierRow(row.id, "unitPrice", event.target.value)}
+                  />
+                  <button className="button secondary" type="button" onClick={() => removeTierRow(row.id)}>Xóa</button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="form-section promo-row">
+            <input
+              className="input"
+              placeholder="Khuyến mãi: mua X (VD: 10)"
+              value={promoBuyQuantity}
+              onChange={(event) => setPromoBuyQuantity(event.target.value)}
+            />
+            <input
+              className="input"
+              placeholder="Khuyến mãi: tặng Y (VD: 1)"
+              value={promoBonusQuantity}
+              onChange={(event) => setPromoBonusQuantity(event.target.value)}
+            />
+          </div>
           <button className="button" type="submit">Thêm</button>
         </form>
+        {productError && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            Lỗi: {productError}
+          </p>
+        )}
       </div>
 
       <div className="card">
@@ -259,6 +431,8 @@ export default function ProductsPage() {
               <th>Tên</th>
               <th>Giá (VND)</th>
               <th>Giá (USDT)</th>
+              <th>Giá theo SL</th>
+              <th>Khuyến mãi</th>
               <th>Mô tả</th>
               <th>Format data</th>
               <th>Hành động</th>
@@ -271,18 +445,23 @@ export default function ProductsPage() {
                 <td>{product.name}</td>
                 <td>{product.price.toLocaleString()}</td>
                 <td>{product.price_usdt?.toString() ?? "0"}</td>
+                <td>{formatTierSummary(product.price_tiers)}</td>
+                <td>
+                  {(product.promo_buy_quantity || 0) > 0 && (product.promo_bonus_quantity || 0) > 0
+                    ? `Mua ${product.promo_buy_quantity} tặng ${product.promo_bonus_quantity}`
+                    : "Không"}
+                </td>
                 <td>{product.description ?? ""}</td>
                 <td>{product.format_data ?? ""}</td>
                 <td>
                   <button className="button secondary" onClick={() => startEdit(product)}>Chỉnh sửa</button>
-                  <button className="button secondary" style={{ marginLeft: 8 }} onClick={() => handleUpdateUsdt(product)}>USDT</button>
                   <button className="button danger" style={{ marginLeft: 8 }} onClick={() => setDeleteProduct(product)}>Xóa</button>
                 </td>
               </tr>
             ))}
             {!products.length && (
               <tr>
-                <td colSpan={7} className="muted">Chưa có sản phẩm.</td>
+                <td colSpan={9} className="muted">Chưa có sản phẩm.</td>
               </tr>
             )}
           </tbody>
@@ -374,6 +553,51 @@ export default function ProductsPage() {
                 value={editFormatData}
                 onChange={(e) => setEditFormatData(e.target.value)}
               />
+              <div className="form-section pricing-box">
+                <div className="pricing-head">
+                  <h4>Giá theo số lượng (VND)</h4>
+                  <button className="button secondary" type="button" onClick={addEditTierRow}>+ Thêm mức</button>
+                </div>
+                <p className="muted">Giá mốc này sẽ ghi đè giá mặc định khi khách mua đạt ngưỡng số lượng.</p>
+                <div className="tier-list">
+                  {editPriceTierRows.map((row) => (
+                    <div className="tier-row" key={row.id}>
+                      <input
+                        className="input"
+                        placeholder="Từ số lượng"
+                        value={row.minQuantity}
+                        onChange={(event) => updateEditTierRow(row.id, "minQuantity", event.target.value)}
+                      />
+                      <input
+                        className="input"
+                        placeholder="Đơn giá VND"
+                        value={row.unitPrice}
+                        onChange={(event) => updateEditTierRow(row.id, "unitPrice", event.target.value)}
+                      />
+                      <button className="button secondary" type="button" onClick={() => removeEditTierRow(row.id)}>Xóa</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="form-section promo-row">
+                <input
+                  className="input"
+                  placeholder="Khuyến mãi: mua X"
+                  value={editPromoBuyQuantity}
+                  onChange={(event) => setEditPromoBuyQuantity(event.target.value)}
+                />
+                <input
+                  className="input"
+                  placeholder="Khuyến mãi: tặng Y"
+                  value={editPromoBonusQuantity}
+                  onChange={(event) => setEditPromoBonusQuantity(event.target.value)}
+                />
+              </div>
+              {productError && (
+                <p className="muted form-section" style={{ marginTop: 0 }}>
+                  Lỗi: {productError}
+                </p>
+              )}
               <div className="modal-actions">
                 <button className="button" type="submit">Lưu</button>
                 <button className="button secondary" type="button" onClick={cancelEdit}>Hủy</button>
