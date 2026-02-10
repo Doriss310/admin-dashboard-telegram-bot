@@ -4,13 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 
-interface UserRow {
+interface UserBaseRow {
   user_id: number;
   username: string | null;
   balance: number;
   balance_usdt: number;
   language: string | null;
   created_at: string | null;
+}
+
+interface OrderStatRow {
+  user_id: number;
+  price: number | null;
+}
+
+interface UserRow extends UserBaseRow {
+  order_count: number;
+  total_paid: number;
 }
 
 export default function UsersPage() {
@@ -26,7 +36,36 @@ export default function UsersPage() {
       .select("user_id, username, balance, balance_usdt, language, created_at")
       .order("created_at", { ascending: false })
       .limit(200);
-    setUsers((data as UserRow[]) || []);
+    const baseUsers = (data as UserBaseRow[]) || [];
+    if (!baseUsers.length) {
+      setUsers([]);
+      return;
+    }
+
+    const userIds = baseUsers.map((user) => user.user_id);
+    const { data: orderData } = await supabase
+      .from("orders")
+      .select("user_id, price")
+      .in("user_id", userIds);
+
+    const statsByUser = new Map<number, { orderCount: number; totalPaid: number }>();
+    ((orderData as OrderStatRow[]) || []).forEach((order) => {
+      const current = statsByUser.get(order.user_id) || { orderCount: 0, totalPaid: 0 };
+      current.orderCount += 1;
+      current.totalPaid += Number(order.price || 0);
+      statsByUser.set(order.user_id, current);
+    });
+
+    const rows: UserRow[] = baseUsers.map((user) => {
+      const stats = statsByUser.get(user.user_id);
+      return {
+        ...user,
+        order_count: stats?.orderCount ?? 0,
+        total_paid: stats?.totalPaid ?? 0
+      };
+    });
+
+    setUsers(rows);
   };
 
   useEffect(() => {
@@ -34,8 +73,17 @@ export default function UsersPage() {
   }, []);
 
   const filtered = useMemo(() => {
-    if (!search) return users;
-    return users.filter((user) => user.user_id.toString().includes(search));
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return users;
+    const keywordNoAt = keyword.replace(/^@/, "");
+
+    return users.filter((user) => {
+      const userIdMatch = user.user_id.toString().includes(keywordNoAt);
+      const username = (user.username || "").toLowerCase();
+      const usernameNoAt = username.replace(/^@/, "");
+      const usernameMatch = username.includes(keyword) || usernameNoAt.includes(keywordNoAt);
+      return userIdMatch || usernameMatch;
+    });
   }, [search, users]);
 
   const sendMessageRequest = async (payload: { message: string; userId?: number; broadcast?: boolean }) => {
@@ -94,7 +142,7 @@ export default function UsersPage() {
         <div className="form-grid">
           <input
             className="input"
-            placeholder="Tìm theo user_id"
+            placeholder="Tìm theo user_id hoặc username"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -123,6 +171,8 @@ export default function UsersPage() {
             <tr>
               <th>User ID</th>
               <th>Username</th>
+              <th>Đơn đã mua</th>
+              <th>Tổng đã mua (VND)</th>
               <th>Balance (VND)</th>
               <th>Balance (USDT)</th>
               <th>Lang</th>
@@ -135,6 +185,8 @@ export default function UsersPage() {
               <tr key={user.user_id}>
                 <td>{user.user_id}</td>
                 <td>{user.username ?? "-"}</td>
+                <td>{user.order_count.toLocaleString("vi-VN")}</td>
+                <td>{user.total_paid.toLocaleString("vi-VN")}</td>
                 <td>{(user.balance || 0).toLocaleString()}</td>
                 <td>{user.balance_usdt?.toString() ?? "0"}</td>
                 <td>{user.language ?? "vi"}</td>
@@ -148,7 +200,7 @@ export default function UsersPage() {
             ))}
             {!filtered.length && (
               <tr>
-                <td colSpan={7} className="muted">Chưa có dữ liệu.</td>
+                <td colSpan={9} className="muted">Chưa có dữ liệu.</td>
               </tr>
             )}
           </tbody>
