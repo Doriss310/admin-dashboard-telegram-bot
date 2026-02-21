@@ -132,12 +132,17 @@ p {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 9px 16px;
   border-radius: 10px;
   border: none;
   font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
   cursor: pointer;
   background: var(--primary);
   color: white;
@@ -147,6 +152,22 @@ p {
 .button.secondary {
   background: rgba(15, 118, 110, 0.12);
   color: var(--primary-strong);
+}
+
+.button.warning {
+  background: rgba(245, 158, 11, 0.18);
+  color: #8f4b00;
+}
+
+.dashboard-switch-card {
+  box-shadow: none;
+  margin-top: 8px;
+}
+
+.dashboard-switch-link {
+  margin-top: 10px;
+  width: 100%;
+  white-space: nowrap;
 }
 
 .button.danger {
@@ -397,6 +418,27 @@ p {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.product-actions-cell {
+  min-width: 260px;
+}
+
+.product-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action-pill {
+  min-width: 82px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: none;
 }
 
 .modal-backdrop {

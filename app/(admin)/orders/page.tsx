@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 interface OrderRow {
-  id: number;
-  user_id: number;
-  product_id: number;
-  content: string;
+  id: number | string;
+  user_id: number | string;
+  product_id: number | string;
   price: number;
   quantity: number;
   created_at: string;
@@ -15,19 +14,78 @@ interface OrderRow {
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [usernamesByUserId, setUsernamesByUserId] = useState<Record<string, string | null>>({});
+  const [productNamesById, setProductNamesById] = useState<Record<string, string>>({});
 
   const load = async () => {
     const { data } = await supabase
       .from("orders")
-      .select("id, user_id, product_id, content, price, quantity, created_at")
+      .select("id, user_id, product_id, price, quantity, created_at")
       .order("created_at", { ascending: false })
       .limit(200);
-    setOrders((data as OrderRow[]) || []);
+    const rows = (data as OrderRow[]) || [];
+    setOrders(rows);
+
+    const userIds = Array.from(
+      new Set(
+        rows
+          .map((order) => order.user_id)
+          .filter((value): value is number | string => value !== null && value !== undefined)
+          .map(String)
+      )
+    );
+    const productIds = Array.from(
+      new Set(
+        rows
+          .map((order) => order.product_id)
+          .filter((value): value is number | string => value !== null && value !== undefined)
+          .map(String)
+      )
+    );
+
+    const [usersRes, productsRes] = await Promise.all([
+      userIds.length
+        ? supabase.from("users").select("user_id, username").in("user_id", userIds)
+        : Promise.resolve({ data: [] as Array<{ user_id: number | string; username: string | null }> }),
+      productIds.length
+        ? supabase.from("products").select("id, name").in("id", productIds)
+        : Promise.resolve({ data: [] as Array<{ id: number | string; name: string }> })
+    ]);
+
+    const usernames: Record<string, string | null> = {};
+    for (const user of usersRes.data ?? []) {
+      if (user?.user_id === null || user?.user_id === undefined) continue;
+      usernames[String(user.user_id)] = user.username ?? null;
+    }
+    setUsernamesByUserId(usernames);
+
+    const productNames: Record<string, string> = {};
+    for (const product of productsRes.data ?? []) {
+      if (product?.id === null || product?.id === undefined) continue;
+      productNames[String(product.id)] = product.name;
+    }
+    setProductNamesById(productNames);
   };
 
   useEffect(() => {
     load();
   }, []);
+
+  const formatDateTime = (isoString: string | null | undefined) => {
+    if (!isoString) return "-";
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return isoString;
+    return new Intl.DateTimeFormat("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    }).format(date);
+  };
 
   return (
     <div className="grid" style={{ gap: 24 }}>
@@ -44,11 +102,12 @@ export default function OrdersPage() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>User</th>
-              <th>Product</th>
-              <th>Qty</th>
-              <th>Price</th>
-              <th>Time</th>
+              <th>UserID</th>
+              <th>Username</th>
+              <th>Sản phẩm</th>
+              <th>SL</th>
+              <th>Giá</th>
+              <th>Thời gian</th>
             </tr>
           </thead>
           <tbody>
@@ -56,15 +115,16 @@ export default function OrdersPage() {
               <tr key={order.id}>
                 <td>#{order.id}</td>
                 <td>{order.user_id}</td>
-                <td>{order.product_id}</td>
+                <td>{usernamesByUserId[String(order.user_id)] || "-"}</td>
+                <td>{productNamesById[String(order.product_id)] || order.product_id}</td>
                 <td>{order.quantity}</td>
-                <td>{order.price.toLocaleString()}</td>
-                <td>{new Date(order.created_at).toLocaleString()}</td>
+                <td>{order.price.toLocaleString("vi-VN")}</td>
+                <td>{formatDateTime(order.created_at)}</td>
               </tr>
             ))}
             {!orders.length && (
               <tr>
-                <td colSpan={6} className="muted">Chưa có đơn hàng.</td>
+                <td colSpan={7} className="muted">Chưa có đơn hàng.</td>
               </tr>
             )}
           </tbody>

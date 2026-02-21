@@ -24,17 +24,24 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const load = async () => {
-      const { data: statsData } = await supabase.rpc("get_stats");
-      if (statsData && Array.isArray(statsData) && statsData[0]) {
-        setStats(statsData[0]);
-      }
+      const [usersCountRes, ordersDataRes] = await Promise.all([
+        supabase.from("users").select("user_id", { count: "exact", head: true }),
+        supabase
+          .from("orders")
+          .select("id, user_id, product_id, price, quantity, created_at")
+          .order("created_at", { ascending: false })
+          .limit(5000)
+      ]);
 
-      const { data: ordersData } = await supabase
-        .from("orders")
-        .select("id, user_id, product_id, price, quantity, created_at")
-        .order("created_at", { ascending: false })
-        .limit(6);
-      const latestOrders = (ordersData as OrderRow[]) || [];
+      const allOrders = (ordersDataRes.data as OrderRow[]) || [];
+      const revenue = allOrders.reduce((sum, row) => sum + Number(row.price || 0), 0);
+      setStats({
+        users: usersCountRes.count ?? 0,
+        orders: allOrders.length,
+        revenue
+      });
+
+      const latestOrders = allOrders.slice(0, 6);
       setOrders(latestOrders);
 
       // Fetch usernames and product names for the visible rows (keeps the dashboard query simple).

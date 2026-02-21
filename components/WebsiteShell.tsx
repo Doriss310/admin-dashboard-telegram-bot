@@ -6,20 +6,17 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 const navItems = [
-  { href: "/", label: "Dashboard" },
-  { href: "/products", label: "Products" },
-  { href: "/stock", label: "Stock" },
-  { href: "/orders", label: "Orders" },
-  { href: "/direct-orders", label: "Direct Orders" },
-  { href: "/deposits", label: "Deposits" },
-  { href: "/withdrawals", label: "Withdrawals" },
-  { href: "/usdt", label: "USDT" },
-  { href: "/users", label: "Users" },
-  { href: "/reports", label: "Reports" },
-  { href: "/settings", label: "Settings" }
+  { href: "/website", label: "Dashboard" },
+  { href: "/website/products", label: "Products" },
+  { href: "/website/stock", label: "Stock" },
+  { href: "/website/orders", label: "Orders" },
+  { href: "/website/direct-orders", label: "Direct Orders" },
+  { href: "/website/users", label: "Users" },
+  { href: "/website/reports", label: "Reports" },
+  { href: "/website/settings", label: "Settings" }
 ];
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function WebsiteShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -99,13 +96,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">Bot Dashboard</div>
+        <div className="brand">Website Dashboard</div>
         <div className="nav">
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className={`nav-link ${pathname === item.href || (item.href !== "/" && pathname.startsWith(`${item.href}/`)) ? "active" : ""}`}
+              className={`nav-link ${
+                item.href === "/website"
+                  ? pathname === "/website"
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`)
+                  ? "active"
+                  : ""
+              }`}
             >
               {item.label}
             </Link>
@@ -113,8 +116,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <div className="card dashboard-switch-card">
           <div className="muted">Chuyển dashboard</div>
-          <Link className="button secondary dashboard-switch-link" href="/website">
-            Website Dashboard
+          <Link className="button secondary dashboard-switch-link" href="/">
+            Bot Dashboard
           </Link>
         </div>
         <div className="card" style={{ boxShadow: "none" }}>

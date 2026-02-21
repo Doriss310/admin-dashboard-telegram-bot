@@ -81,7 +81,7 @@ export default function SettingsPage() {
       <div className="topbar">
         <div>
           <h1 className="page-title">Settings</h1>
-          <p className="muted">Cập nhật cấu hình ngân hàng và hệ thống.</p>
+          <p className="muted">Cập nhật cấu hình Bot Telegram.</p>
         </div>
       </div>
 
@@ -149,6 +149,13 @@ export default function SettingsPage() {
               value={values.shop_page_size || "10"}
               onChange={(e) => updateField("shop_page_size", e.target.value)}
             />
+          </div>
+          <div className="form-section">
+            <div className="section-title">Website Storefront</div>
+            <p className="muted" style={{ marginBottom: 10 }}>
+              Website có dashboard riêng, sidebar riêng và settings riêng.
+            </p>
+            <a className="button secondary" href="/website/settings">Mở Website Dashboard</a>
           </div>
           <select
             className="select"

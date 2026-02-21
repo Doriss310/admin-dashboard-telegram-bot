@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 interface PriceTier {
@@ -16,13 +16,12 @@ interface PriceTierRow {
 
 interface Product {
   id: number;
-  sort_position: number | null;
   name: string;
-  price: number;
-  price_usdt: number;
-  price_tiers: PriceTier[] | null;
-  promo_buy_quantity: number | null;
-  promo_bonus_quantity: number | null;
+  website_name: string | null;
+  website_price: number | null;
+  website_price_tiers: PriceTier[] | null;
+  website_promo_buy_quantity: number | null;
+  website_promo_bonus_quantity: number | null;
   description: string | null;
   format_data: string | null;
   is_hidden: boolean;
@@ -34,31 +33,6 @@ interface FormatTemplate {
   name: string;
   pattern: string;
 }
-
-type ProductListTab = "visible" | "hidden" | "deleted";
-
-const parseSortPosition = (value: string): { valid: boolean; value: number | null } => {
-  const normalized = value.trim();
-  if (!normalized) return { valid: true, value: null };
-  const numeric = Number(normalized);
-  if (!Number.isFinite(numeric)) return { valid: false, value: null };
-  const parsed = Math.trunc(numeric);
-  if (parsed < 0) return { valid: false, value: null };
-  return { valid: true, value: parsed };
-};
-
-const sortProductsByPosition = (items: Product[]) =>
-  items
-    .slice()
-    .sort((a, b) => {
-      const aPos = a.sort_position;
-      const bPos = b.sort_position;
-      if (aPos === null && bPos === null) return a.id - b.id;
-      if (aPos === null) return 1;
-      if (bPos === null) return -1;
-      if (aPos !== bPos) return aPos - bPos;
-      return a.id - b.id;
-    });
 
 const createTierRow = (tier?: PriceTier): PriceTierRow => ({
   id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -99,14 +73,11 @@ const formatTierSummary = (tiers: PriceTier[] | null | undefined) => {
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [productListTab, setProductListTab] = useState<ProductListTab>("visible");
   const [formatTemplates, setFormatTemplates] = useState<FormatTemplate[]>([]);
   const [role, setRole] = useState<string | null>(null);
   const [productError, setProductError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
-  const [priceUsdt, setPriceUsdt] = useState("");
-  const [sortPosition, setSortPosition] = useState("");
   const [description, setDescription] = useState("");
   const [formatData, setFormatData] = useState("");
   const [priceTierRows, setPriceTierRows] = useState<PriceTierRow[]>([createTierRow()]);
@@ -115,8 +86,6 @@ export default function ProductsPage() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
-  const [editPriceUsdt, setEditPriceUsdt] = useState("");
-  const [editSortPosition, setEditSortPosition] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editFormatData, setEditFormatData] = useState("");
   const [editPriceTierRows, setEditPriceTierRows] = useState<PriceTierRow[]>([createTierRow()]);
@@ -134,39 +103,29 @@ export default function ProductsPage() {
   const load = async () => {
     const { data, error } = await supabase
       .from("products")
-      .select("id, sort_position, name, price, price_usdt, price_tiers, promo_buy_quantity, promo_bonus_quantity, description, format_data, is_hidden, is_deleted")
+      .select("id, name, website_name, website_price, website_price_tiers, website_promo_buy_quantity, website_promo_bonus_quantity, website_description:website_description, format_data, is_hidden, is_deleted")
       .order("id");
     if (error) {
-      const withHiddenFallback = await supabase
-        .from("products")
-        .select("id, name, price, price_usdt, price_tiers, promo_buy_quantity, promo_bonus_quantity, description, format_data, is_hidden, is_deleted")
-        .order("id");
-      if (!withHiddenFallback.error) {
-        setProductError("Thiếu cột sort_position trong products. Hãy chạy SQL migration position mới.");
-        setProducts(
-          ((withHiddenFallback.data as Product[]) || []).map((row) => ({
-            ...row,
-            sort_position: null,
-            is_hidden: Boolean((row as any).is_hidden),
-            is_deleted: Boolean((row as any).is_deleted)
-          }))
-        );
-        return;
-      }
-
-      const fallback = await supabase
+      const { data: fallbackData, error: fallbackError } = await supabase
         .from("products")
         .select("id, name, price, price_usdt, price_tiers, promo_buy_quantity, promo_bonus_quantity, description, format_data")
         .order("id");
-      if (fallback.error) {
-        setProductError(error.message);
+      if (fallbackError) {
+        setProductError(fallbackError.message);
         return;
       }
-      setProductError("Thiếu cột is_hidden/is_deleted. Hãy chạy SQL migration soft-delete mới.");
+      setProductError("Thiếu cột website_* trong products. Hãy chạy SQL migration mới cho Website Dashboard.");
       setProducts(
-        ((fallback.data as Product[]) || []).map((row) => ({
-          ...row,
-          sort_position: null,
+        ((fallbackData as any[]) || []).map((row) => ({
+          id: Number(row.id),
+          name: String(row.name || ""),
+          website_name: String(row.name || ""),
+          website_price: Number(row.price || 0),
+          website_price_tiers: (row.price_tiers as PriceTier[] | null) ?? null,
+          website_promo_buy_quantity: Number(row.promo_buy_quantity || 0),
+          website_promo_bonus_quantity: Number(row.promo_bonus_quantity || 0),
+          description: row.description ?? null,
+          format_data: row.format_data ?? null,
           is_hidden: false,
           is_deleted: false
         }))
@@ -175,11 +134,18 @@ export default function ProductsPage() {
     }
     setProductError(null);
     setProducts(
-      ((data as Product[]) || []).map((row) => ({
-        ...row,
-        sort_position: row.sort_position !== null && row.sort_position !== undefined ? Number(row.sort_position) : null,
-        is_hidden: Boolean((row as any).is_hidden),
-        is_deleted: Boolean((row as any).is_deleted)
+      ((data as any[]) || []).map((row) => ({
+        id: Number(row.id),
+        name: String(row.name || ""),
+        website_name: row.website_name ?? null,
+        website_price: Number(row.website_price || 0),
+        website_price_tiers: (row.website_price_tiers as PriceTier[] | null) ?? null,
+        website_promo_buy_quantity: Number(row.website_promo_buy_quantity || 0),
+        website_promo_bonus_quantity: Number(row.website_promo_bonus_quantity || 0),
+        description: row.website_description ?? null,
+        format_data: row.format_data ?? null,
+        is_hidden: Boolean(row.is_hidden),
+        is_deleted: Boolean(row.is_deleted)
       }))
     );
   };
@@ -213,25 +179,6 @@ export default function ProductsPage() {
     loadFormats();
     loadRole();
   }, []);
-
-  const visibleProducts = useMemo(
-    () => sortProductsByPosition(products.filter((product) => !product.is_deleted && !product.is_hidden)),
-    [products]
-  );
-  const hiddenProducts = useMemo(
-    () => sortProductsByPosition(products.filter((product) => !product.is_deleted && product.is_hidden)),
-    [products]
-  );
-  const deletedProducts = useMemo(
-    () => sortProductsByPosition(products.filter((product) => product.is_deleted)),
-    [products]
-  );
-
-  const listedProducts = useMemo(() => {
-    if (productListTab === "hidden") return hiddenProducts;
-    if (productListTab === "deleted") return deletedProducts;
-    return visibleProducts;
-  }, [deletedProducts, hiddenProducts, productListTab, visibleProducts]);
 
   const addTierRow = () => {
     setPriceTierRows((prev) => [...prev, createTierRow()]);
@@ -268,41 +215,52 @@ export default function ProductsPage() {
     const tiers = normalizeTierRows(priceTierRows);
     const buyQty = Number(promoBuyQuantity || "0");
     const bonusQty = Number(promoBonusQuantity || "0");
+    const parsedPrice = Number.parseInt(price || "0", 10);
+    const websitePrice = Number.isFinite(parsedPrice) ? Math.max(0, parsedPrice) : 0;
     const hasPromo = buyQty > 0 || bonusQty > 0;
     if (hasPromo && (!Number.isFinite(buyQty) || !Number.isFinite(bonusQty) || buyQty < 1 || bonusQty < 1)) {
       setProductError("Khuyến mãi cần đủ 2 giá trị hợp lệ: mua X và tặng Y đều phải lớn hơn 0.");
       return;
     }
-    const parsedSortPosition = parseSortPosition(sortPosition);
-    if (!parsedSortPosition.valid) {
-      setProductError("Vị trí phải là số nguyên lớn hơn hoặc bằng 0 (hoặc để trống).");
-      return;
-    }
 
-    const { error } = await supabase.from("products").insert({
+    const websitePayload = {
       name,
-      price: parseInt(price || "0", 10),
-      price_usdt: parseFloat(priceUsdt || "0"),
-      sort_position: parsedSortPosition.value,
-      description,
+      price: 0,
+      price_usdt: 0,
+      website_name: name || null,
+      website_price: websitePrice,
+      website_price_tiers: tiers.length ? tiers : null,
+      website_promo_buy_quantity: hasPromo ? Math.trunc(buyQty) : 0,
+      website_promo_bonus_quantity: hasPromo ? Math.trunc(bonusQty) : 0,
+      website_description: description || null,
+      format_data: formatData || null
+    };
+
+    const fallbackPayload = {
+      name,
+      price: websitePrice,
+      price_usdt: 0,
       format_data: formatData || null,
       price_tiers: tiers.length ? tiers : null,
       promo_buy_quantity: hasPromo ? Math.trunc(buyQty) : 0,
       promo_bonus_quantity: hasPromo ? Math.trunc(bonusQty) : 0
-    });
+    };
+
+    let { error } = await supabase.from("products").insert(websitePayload);
+    if (error && error.message.includes("website_")) {
+      const fallback = await supabase.from("products").insert({
+        ...fallbackPayload,
+        description: description || null
+      });
+      error = fallback.error;
+    }
     if (error) {
-      setProductError(
-        error.message.includes("sort_position")
-          ? "Thiếu cột sort_position trong products. Hãy chạy SQL migration position mới."
-          : error.message
-      );
+      setProductError(error.message);
       return;
     }
     setProductError(null);
     setName("");
     setPrice("");
-    setPriceUsdt("");
-    setSortPosition("");
     setDescription("");
     setFormatData("");
     setPriceTierRows([createTierRow()]);
@@ -372,23 +330,19 @@ export default function ProductsPage() {
 
   const startEdit = (product: Product) => {
     setEditingProduct(product);
-    setEditName(product.name);
-    setEditPrice(product.price.toString());
-    setEditPriceUsdt(product.price_usdt?.toString() ?? "");
-    setEditSortPosition(product.sort_position !== null && product.sort_position !== undefined ? String(product.sort_position) : "");
+    setEditName(product.website_name || product.name);
+    setEditPrice((product.website_price ?? 0).toString());
     setEditDescription(product.description ?? "");
     setEditFormatData(product.format_data ?? "");
-    setEditPriceTierRows(parseTierRows(product.price_tiers));
-    setEditPromoBuyQuantity(product.promo_buy_quantity ? product.promo_buy_quantity.toString() : "");
-    setEditPromoBonusQuantity(product.promo_bonus_quantity ? product.promo_bonus_quantity.toString() : "");
+    setEditPriceTierRows(parseTierRows(product.website_price_tiers));
+    setEditPromoBuyQuantity(product.website_promo_buy_quantity ? product.website_promo_buy_quantity.toString() : "");
+    setEditPromoBonusQuantity(product.website_promo_bonus_quantity ? product.website_promo_bonus_quantity.toString() : "");
   };
 
   const cancelEdit = () => {
     setEditingProduct(null);
     setEditName("");
     setEditPrice("");
-    setEditPriceUsdt("");
-    setEditSortPosition("");
     setEditDescription("");
     setEditFormatData("");
     setEditPriceTierRows([createTierRow()]);
@@ -402,37 +356,48 @@ export default function ProductsPage() {
     const tiers = normalizeTierRows(editPriceTierRows);
     const buyQty = Number(editPromoBuyQuantity || "0");
     const bonusQty = Number(editPromoBonusQuantity || "0");
+    const parsedPrice = Number.parseInt(editPrice || "0", 10);
+    const websitePrice = Number.isFinite(parsedPrice) ? Math.max(0, parsedPrice) : 0;
     const hasPromo = buyQty > 0 || bonusQty > 0;
     if (hasPromo && (!Number.isFinite(buyQty) || !Number.isFinite(bonusQty) || buyQty < 1 || bonusQty < 1)) {
       setProductError("Khuyến mãi cần đủ 2 giá trị hợp lệ: mua X và tặng Y đều phải lớn hơn 0.");
       return;
     }
-    const parsedSortPosition = parseSortPosition(editSortPosition);
-    if (!parsedSortPosition.valid) {
-      setProductError("Vị trí phải là số nguyên lớn hơn hoặc bằng 0 (hoặc để trống).");
-      return;
-    }
 
-    const { error } = await supabase
+    const websiteUpdatePayload = {
+      website_name: editName || null,
+      website_price: websitePrice,
+      website_price_tiers: tiers.length ? tiers : null,
+      website_promo_buy_quantity: hasPromo ? Math.trunc(buyQty) : 0,
+      website_promo_bonus_quantity: hasPromo ? Math.trunc(bonusQty) : 0,
+      website_description: editDescription || null,
+      format_data: editFormatData || null,
+    };
+
+    const fallbackUpdatePayload = {
+      name: editName,
+      price: websitePrice,
+      price_tiers: tiers.length ? tiers : null,
+      promo_buy_quantity: hasPromo ? Math.trunc(buyQty) : 0,
+      promo_bonus_quantity: hasPromo ? Math.trunc(bonusQty) : 0
+    };
+
+    let { error } = await supabase
       .from("products")
-      .update({
-        name: editName,
-        price: parseInt(editPrice || "0", 10),
-        price_usdt: parseFloat(editPriceUsdt || "0"),
-        sort_position: parsedSortPosition.value,
-        description: editDescription,
-        format_data: editFormatData || null,
-        price_tiers: tiers.length ? tiers : null,
-        promo_buy_quantity: hasPromo ? Math.trunc(buyQty) : 0,
-        promo_bonus_quantity: hasPromo ? Math.trunc(bonusQty) : 0
-      })
+      .update(websiteUpdatePayload)
       .eq("id", editingProduct.id);
+    if (error && error.message.includes("website_")) {
+      const fallback = await supabase
+        .from("products")
+        .update({
+          ...fallbackUpdatePayload,
+          description: editDescription || null
+        })
+        .eq("id", editingProduct.id);
+      error = fallback.error;
+    }
     if (error) {
-      setProductError(
-        error.message.includes("sort_position")
-          ? "Thiếu cột sort_position trong products. Hãy chạy SQL migration position mới."
-          : error.message
-      );
+      setProductError(error.message);
       return;
     }
     setProductError(null);
@@ -508,19 +473,22 @@ export default function ProductsPage() {
     <div className="grid" style={{ gap: 24 }}>
       <div className="topbar">
         <div>
-          <h1 className="page-title">Products</h1>
-          <p className="muted">Quản lý danh sách sản phẩm, giá bán và Banner Hàng hóa theo từng Product.</p>
+          <h1 className="page-title">Website Products</h1>
+          <p className="muted">Giá, giá theo SL và khuyến mãi ở đây là bản Website riêng, không dùng chung với Bot Telegram.</p>
         </div>
       </div>
 
       <div className="card">
         <h3 className="section-title">Thêm sản phẩm mới</h3>
         <form className="form-grid" onSubmit={handleAdd}>
-          <input className="input" placeholder="Tên sản phẩm" value={name} onChange={(e) => setName(e.target.value)} required />
-          <input className="input" placeholder="Giá (VND)" value={price} onChange={(e) => setPrice(e.target.value)} required />
-          <input className="input" placeholder="Giá (USDT)" value={priceUsdt} onChange={(e) => setPriceUsdt(e.target.value)} />
-          <input className="input" placeholder="Vị trí trên Bot (VD: 1, 2, 3)" value={sortPosition} onChange={(e) => setSortPosition(e.target.value)} />
-          <input className="input" placeholder="Mô tả (gửi trước Account sau thanh toán)" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <input className="input" placeholder="Tên Website" value={name} onChange={(e) => setName(e.target.value)} required />
+          <input className="input" placeholder="Giá Website (VND)" value={price} onChange={(e) => setPrice(e.target.value)} required />
+          <input
+            className="input"
+            placeholder="Mô tả Website (hiển thị riêng cho Website)"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
           <select
             className="select"
             value=""
@@ -590,60 +558,38 @@ export default function ProductsPage() {
 
       <div className="card">
         <h3 className="section-title">Danh sách sản phẩm</h3>
-        <p className="muted" style={{ marginBottom: 10 }}>
-          Bot sẽ ưu tiên sắp xếp theo cột <strong>Vị trí</strong> tăng dần. Để trống sẽ xếp sau theo ID.
-        </p>
-        <div className="segmented" style={{ marginBottom: 12 }}>
-          <button
-            className={`segmented-button ${productListTab === "visible" ? "active" : ""}`}
-            type="button"
-            onClick={() => setProductListTab("visible")}
-          >
-            Đang hiển thị ({visibleProducts.length})
-          </button>
-          <button
-            className={`segmented-button ${productListTab === "hidden" ? "active" : ""}`}
-            type="button"
-            onClick={() => setProductListTab("hidden")}
-          >
-            Đang ẩn ({hiddenProducts.length})
-          </button>
-          <button
-            className={`segmented-button danger ${productListTab === "deleted" ? "active" : ""}`}
-            type="button"
-            onClick={() => setProductListTab("deleted")}
-          >
-            Đã xóa mềm ({deletedProducts.length})
-          </button>
-        </div>
         <table className="table">
           <thead>
             <tr>
               <th>ID</th>
-              <th>Vị trí</th>
-              <th>Tên</th>
-              <th>Giá (VND)</th>
-              <th>Giá (USDT)</th>
-              <th>Giá theo SL</th>
-              <th>Khuyến mãi</th>
-              <th>Mô tả</th>
+              <th>Tên Website</th>
+              <th>Giá Website (VND)</th>
+              <th>Giá theo SL Website</th>
+              <th>Khuyến mãi Website</th>
+              <th>Trạng thái</th>
+              <th>Mô tả Website</th>
               <th>Format data</th>
               <th>Hành động</th>
             </tr>
           </thead>
           <tbody>
-            {listedProducts.map((product) => (
+            {products.map((product) => (
               <tr key={product.id}>
                 <td>#{product.id}</td>
-                <td>{product.sort_position ?? "-"}</td>
-                <td>{product.name}</td>
-                <td>{product.price.toLocaleString()}</td>
-                <td>{product.price_usdt?.toString() ?? "0"}</td>
-                <td>{formatTierSummary(product.price_tiers)}</td>
+                <td>{product.website_name || product.name}</td>
+                <td>{(product.website_price || 0).toLocaleString()}</td>
+                <td>{formatTierSummary(product.website_price_tiers)}</td>
                 <td>
-                  {(product.promo_buy_quantity || 0) > 0 && (product.promo_bonus_quantity || 0) > 0
-                    ? `Mua ${product.promo_buy_quantity} tặng ${product.promo_bonus_quantity}`
+                  {(product.website_promo_buy_quantity || 0) > 0 && (product.website_promo_bonus_quantity || 0) > 0
+                    ? `Mua ${product.website_promo_buy_quantity} tặng ${product.website_promo_bonus_quantity}`
                     : "Không"}
+                </td>
+                <td>
+                  {product.is_deleted
+                    ? "Đã xóa mềm"
+                    : product.is_hidden
+                    ? "Đang ẩn"
+                    : "Đang hiển thị"}
                 </td>
                 <td>{product.description ?? ""}</td>
                 <td>{product.format_data ?? ""}</td>
@@ -679,15 +625,9 @@ export default function ProductsPage() {
                 </td>
               </tr>
             ))}
-            {!listedProducts.length && (
+            {!products.length && (
               <tr>
-                <td colSpan={10} className="muted">
-                  {productListTab === "hidden"
-                    ? "Chưa có sản phẩm đang ẩn."
-                    : productListTab === "deleted"
-                    ? "Chưa có sản phẩm đã xóa mềm."
-                    : "Chưa có sản phẩm đang hiển thị."}
-                </td>
+                <td colSpan={9} className="muted">Chưa có sản phẩm.</td>
               </tr>
             )}
           </tbody>
@@ -757,11 +697,14 @@ export default function ProductsPage() {
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <h3 className="section-title">Chỉnh sửa sản phẩm #{editingProduct.id}</h3>
             <form className="form-grid" onSubmit={handleUpdate}>
-              <input className="input" placeholder="Tên sản phẩm" value={editName} onChange={(e) => setEditName(e.target.value)} required />
-              <input className="input" placeholder="Giá (VND)" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} required />
-              <input className="input" placeholder="Giá (USDT)" value={editPriceUsdt} onChange={(e) => setEditPriceUsdt(e.target.value)} />
-              <input className="input" placeholder="Vị trí trên Bot (để trống nếu không dùng)" value={editSortPosition} onChange={(e) => setEditSortPosition(e.target.value)} />
-              <textarea className="textarea form-section" placeholder="Mô tả (gửi trước Account sau thanh toán)" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+              <input className="input" placeholder="Tên Website" value={editName} onChange={(e) => setEditName(e.target.value)} required />
+              <input className="input" placeholder="Giá Website (VND)" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} required />
+              <textarea
+                className="textarea form-section"
+                placeholder="Mô tả Website (hiển thị riêng cho Website)"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+              />
               <select
                 className="select"
                 value=""
@@ -871,7 +814,7 @@ export default function ProductsPage() {
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <h3 className="section-title">Xóa mềm sản phẩm #{deleteProduct.id}</h3>
             <p className="muted" style={{ marginTop: 8 }}>
-              Sản phẩm sẽ bị ẩn khỏi danh sách bán nhưng vẫn giữ toàn bộ Orders liên quan. Xác nhận xóa mềm <strong>{deleteProduct.name}</strong>?
+              Sản phẩm sẽ bị ẩn khỏi danh sách bán nhưng vẫn giữ toàn bộ Orders liên quan. Xác nhận xóa mềm <strong>{deleteProduct.website_name || deleteProduct.name}</strong>?
             </p>
             <div className="modal-actions">
               <button className="button danger" type="button" onClick={handleDeleteConfirm}>Xóa mềm</button>
