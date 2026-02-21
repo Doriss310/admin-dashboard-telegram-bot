@@ -21,6 +21,39 @@ interface StockSummary {
   remaining: number;
 }
 
+type CustomCheckSource = "tempmail" | "tinyhost" | "hotmail";
+type CustomCheckScope = "product" | "selected";
+type CustomCheckStatus = "true" | "false" | "error";
+
+interface CustomCheckResult {
+  stock_id: number;
+  identifier: string;
+  content: string;
+  status: CustomCheckStatus;
+  error?: string;
+}
+
+interface CustomCheckFormHistory {
+  sourceHistory: CustomCheckSource[];
+  mailColumnHistory: number[];
+  senderHistory: string[];
+  subjectHistory: string[];
+  concurrencyHistory: number[];
+}
+
+interface CustomCheckHistoryOverrides {
+  source?: CustomCheckSource;
+  mailColumnIndex?: number;
+  senderFilter?: string;
+  subjectFilter?: string;
+  concurrency?: number;
+}
+
+const CUSTOM_CHECK_HISTORY_KEY = "stock_custom_check_form_history_v1";
+const MAX_CUSTOM_CHECK_HISTORY_ITEMS = 5;
+const AVAILABLE_CUSTOM_SOURCES: CustomCheckSource[] = ["hotmail", "tempmail", "tinyhost"];
+const AVAILABLE_CUSTOM_CONCURRENCY = [5, 10, 20, 50];
+
 export default function StockPage() {
   const PAGE_SIZE = 100;
   const [products, setProducts] = useState<Product[]>([]);
@@ -49,6 +82,24 @@ export default function StockPage() {
   const [deleteByTextBusy, setDeleteByTextBusy] = useState(false);
   const [deleteByTextError, setDeleteByTextError] = useState<string | null>(null);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const [customCheckScope, setCustomCheckScope] = useState<CustomCheckScope>("product");
+  const [customCheckSource, setCustomCheckSource] = useState<CustomCheckSource>("hotmail");
+  const [customCheckSenderFilter, setCustomCheckSenderFilter] = useState("noreply@tm.openai.com");
+  const [customCheckSubjectFilter, setCustomCheckSubjectFilter] = useState("Kế hoạch mới");
+  const [customCheckMailColumnIndex, setCustomCheckMailColumnIndex] = useState(1);
+  const [customCheckConcurrency, setCustomCheckConcurrency] = useState(20);
+  const [customCheckBusy, setCustomCheckBusy] = useState(false);
+  const [customCheckError, setCustomCheckError] = useState<string | null>(null);
+  const [customCheckProgress, setCustomCheckProgress] = useState({ completed: 0, total: 0 });
+  const [customCheckResults, setCustomCheckResults] = useState<CustomCheckResult[]>([]);
+  const [customDeleteStatus, setCustomDeleteStatus] = useState<CustomCheckStatus>("error");
+  const [customDeleteBusy, setCustomDeleteBusy] = useState(false);
+  const [customDeleteMessage, setCustomDeleteMessage] = useState<string | null>(null);
+  const [customSourceHistory, setCustomSourceHistory] = useState<CustomCheckSource[]>([]);
+  const [customMailColumnHistory, setCustomMailColumnHistory] = useState<number[]>([]);
+  const [customSenderHistory, setCustomSenderHistory] = useState<string[]>([]);
+  const [customSubjectHistory, setCustomSubjectHistory] = useState<string[]>([]);
+  const [customConcurrencyHistory, setCustomConcurrencyHistory] = useState<number[]>([]);
 
   const loadProducts = async () => {
     const { data } = await supabase.from("products").select("id, name").order("id");
@@ -98,8 +149,125 @@ export default function StockPage() {
     });
   };
 
+  const updateRecentValues = <T,>(history: T[], value: T) =>
+    [value, ...history.filter((item) => item !== value)].slice(0, MAX_CUSTOM_CHECK_HISTORY_ITEMS);
+
+  const saveCustomCheckHistory = (payload: CustomCheckFormHistory) => {
+    try {
+      localStorage.setItem(CUSTOM_CHECK_HISTORY_KEY, JSON.stringify(payload));
+    } catch {
+      // Ignore storage errors on restricted browsers.
+    }
+  };
+
+  const applyCustomCheckHistory = (history: CustomCheckFormHistory) => {
+    setCustomSourceHistory(history.sourceHistory);
+    setCustomMailColumnHistory(history.mailColumnHistory);
+    setCustomSenderHistory(history.senderHistory);
+    setCustomSubjectHistory(history.subjectHistory);
+    setCustomConcurrencyHistory(history.concurrencyHistory);
+
+    if (history.sourceHistory[0]) {
+      setCustomCheckSource(history.sourceHistory[0]);
+    }
+    if (history.mailColumnHistory[0]) {
+      setCustomCheckMailColumnIndex(history.mailColumnHistory[0]);
+    }
+    if (history.senderHistory[0]) {
+      setCustomCheckSenderFilter(history.senderHistory[0]);
+    }
+    if (history.subjectHistory[0]) {
+      setCustomCheckSubjectFilter(history.subjectHistory[0]);
+    }
+    if (history.concurrencyHistory[0]) {
+      setCustomCheckConcurrency(history.concurrencyHistory[0]);
+    }
+  };
+
+  const persistCustomCheckHistory = (overrides: CustomCheckHistoryOverrides = {}) => {
+    const sourceCandidate = overrides.source ?? customCheckSource;
+    const sourceValue: CustomCheckSource = AVAILABLE_CUSTOM_SOURCES.includes(sourceCandidate)
+      ? sourceCandidate
+      : customCheckSource;
+
+    const mailColumnRaw = overrides.mailColumnIndex ?? customCheckMailColumnIndex;
+    const mailColumnValue = Math.max(1, Math.min(30, Math.floor(mailColumnRaw)));
+
+    const senderValue = (overrides.senderFilter ?? customCheckSenderFilter).trim();
+    const subjectValue = (overrides.subjectFilter ?? customCheckSubjectFilter).trim();
+
+    const concurrencyCandidate = overrides.concurrency ?? customCheckConcurrency;
+    const concurrencyValue = AVAILABLE_CUSTOM_CONCURRENCY.includes(concurrencyCandidate)
+      ? concurrencyCandidate
+      : customCheckConcurrency;
+
+    const nextHistory: CustomCheckFormHistory = {
+      sourceHistory: updateRecentValues(customSourceHistory, sourceValue),
+      mailColumnHistory: updateRecentValues(customMailColumnHistory, mailColumnValue),
+      senderHistory: senderValue
+        ? updateRecentValues(customSenderHistory, senderValue)
+        : customSenderHistory.slice(0, MAX_CUSTOM_CHECK_HISTORY_ITEMS),
+      subjectHistory: subjectValue
+        ? updateRecentValues(customSubjectHistory, subjectValue)
+        : customSubjectHistory.slice(0, MAX_CUSTOM_CHECK_HISTORY_ITEMS),
+      concurrencyHistory: updateRecentValues(customConcurrencyHistory, concurrencyValue)
+    };
+
+    setCustomSourceHistory(nextHistory.sourceHistory);
+    setCustomMailColumnHistory(nextHistory.mailColumnHistory);
+    setCustomSenderHistory(nextHistory.senderHistory);
+    setCustomSubjectHistory(nextHistory.subjectHistory);
+    setCustomConcurrencyHistory(nextHistory.concurrencyHistory);
+    saveCustomCheckHistory(nextHistory);
+  };
+
   useEffect(() => {
     loadProducts();
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CUSTOM_CHECK_HISTORY_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<CustomCheckFormHistory>;
+
+      const sourceHistory = (Array.isArray(parsed.sourceHistory) ? parsed.sourceHistory : [])
+        .map((item) => String(item))
+        .filter((item): item is CustomCheckSource =>
+          AVAILABLE_CUSTOM_SOURCES.includes(item as CustomCheckSource)
+        )
+        .slice(0, MAX_CUSTOM_CHECK_HISTORY_ITEMS);
+
+      const mailColumnHistory = (Array.isArray(parsed.mailColumnHistory) ? parsed.mailColumnHistory : [])
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item >= 1 && item <= 30)
+        .slice(0, MAX_CUSTOM_CHECK_HISTORY_ITEMS);
+
+      const senderHistory = (Array.isArray(parsed.senderHistory) ? parsed.senderHistory : [])
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+        .slice(0, MAX_CUSTOM_CHECK_HISTORY_ITEMS);
+
+      const subjectHistory = (Array.isArray(parsed.subjectHistory) ? parsed.subjectHistory : [])
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+        .slice(0, MAX_CUSTOM_CHECK_HISTORY_ITEMS);
+
+      const concurrencyHistory = (Array.isArray(parsed.concurrencyHistory) ? parsed.concurrencyHistory : [])
+        .map((item) => Number(item))
+        .filter((item) => AVAILABLE_CUSTOM_CONCURRENCY.includes(item))
+        .slice(0, MAX_CUSTOM_CHECK_HISTORY_ITEMS);
+
+      applyCustomCheckHistory({
+        sourceHistory,
+        mailColumnHistory,
+        senderHistory,
+        subjectHistory,
+        concurrencyHistory
+      });
+    } catch {
+      // Ignore malformed legacy history.
+    }
   }, []);
 
   useEffect(() => {
@@ -108,10 +276,18 @@ export default function StockPage() {
       setTotalCount(0);
       setStockSummary({ total: 0, sold: 0, remaining: 0 });
       setSelectedStockIds(new Set());
+      setCustomCheckResults([]);
+      setCustomCheckError(null);
+      setCustomCheckProgress({ completed: 0, total: 0 });
+      setCustomDeleteMessage(null);
       return;
     }
     setPage(1);
     setSelectedStockIds(new Set());
+    setCustomCheckResults([]);
+    setCustomCheckError(null);
+    setCustomCheckProgress({ completed: 0, total: 0 });
+    setCustomDeleteMessage(null);
   }, [selectedProductId]);
 
   useEffect(() => {
@@ -330,6 +506,182 @@ export default function StockPage() {
     }
   };
 
+  const customCheckTrueResults = customCheckResults.filter((item) => item.status === "true");
+  const customCheckFalseResults = customCheckResults.filter((item) => item.status === "false");
+  const customCheckErrorResults = customCheckResults.filter((item) => item.status === "error");
+
+  const customCheckTrueLines = customCheckTrueResults.map((item) => item.content);
+  const customCheckFalseLines = customCheckFalseResults.map((item) => item.content);
+  const customCheckErrorLines = customCheckErrorResults.map((item) =>
+    item.error
+      ? `${item.content} | ${item.error}`
+      : item.content
+  );
+
+  const customDeleteStatusLabels: Record<CustomCheckStatus, string> = {
+    true: "True",
+    false: "False",
+    error: "Error"
+  };
+
+  const customSourceOptions = Array.from(
+    new Set<CustomCheckSource>([...customSourceHistory, ...AVAILABLE_CUSTOM_SOURCES])
+  );
+  const customConcurrencyOptions = Array.from(
+    new Set<number>([...customConcurrencyHistory, ...AVAILABLE_CUSTOM_CONCURRENCY])
+  );
+
+  const getCustomDeleteTargetIds = (status: CustomCheckStatus) =>
+    customCheckResults.filter((item) => item.status === status).map((item) => item.stock_id);
+
+  const handleRunCustomCheck = async () => {
+    if (customCheckBusy) return;
+    if (!selectedProductId) {
+      setCustomCheckError("Vui lòng chọn sản phẩm trước khi custom check.");
+      return;
+    }
+    if (customCheckScope === "selected" && selectedStockIds.size === 0) {
+      setCustomCheckError("Vui lòng chọn ít nhất 1 stock trong bảng.");
+      return;
+    }
+
+    const estimatedTotal =
+      customCheckScope === "product" ? stockSummary.total : selectedStockIds.size;
+
+    setCustomCheckBusy(true);
+    setCustomCheckError(null);
+    setCustomDeleteMessage(null);
+    setCustomCheckResults([]);
+    setCustomCheckProgress({ completed: 0, total: estimatedTotal });
+
+    const trimmedSender = customCheckSenderFilter.trim();
+    const trimmedSubject = customCheckSubjectFilter.trim();
+    if (trimmedSender !== customCheckSenderFilter) {
+      setCustomCheckSenderFilter(trimmedSender);
+    }
+    if (trimmedSubject !== customCheckSubjectFilter) {
+      setCustomCheckSubjectFilter(trimmedSubject);
+    }
+    persistCustomCheckHistory({
+      source: customCheckSource,
+      mailColumnIndex: customCheckMailColumnIndex,
+      senderFilter: trimmedSender,
+      subjectFilter: trimmedSubject,
+      concurrency: customCheckConcurrency
+    });
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        setCustomCheckError("Chưa đăng nhập hoặc phiên làm việc đã hết hạn.");
+        return;
+      }
+
+      const payload: {
+        scope: CustomCheckScope;
+        source: CustomCheckSource;
+        senderFilter: string;
+        subjectFilter: string;
+        mailColumnIndex: number;
+        concurrency: number;
+        productId?: number;
+        selectedStockIds?: number[];
+      } = {
+        scope: customCheckScope,
+        source: customCheckSource,
+        senderFilter: trimmedSender,
+        subjectFilter: trimmedSubject,
+        mailColumnIndex: customCheckMailColumnIndex,
+        concurrency: customCheckConcurrency
+      };
+
+      if (customCheckScope === "product") {
+        payload.productId = Number(selectedProductId);
+      } else {
+        payload.selectedStockIds = Array.from(selectedStockIds);
+      }
+
+      const response = await fetch("/api/stock/custom-check", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const json = await response.json().catch(() => null);
+      if (!response.ok) {
+        const errorMessage =
+          typeof json?.error === "string" ? json.error : "Không thể thực hiện custom check.";
+        throw new Error(errorMessage);
+      }
+
+      const results = Array.isArray(json?.results) ? (json.results as CustomCheckResult[]) : [];
+      const total = typeof json?.total === "number" ? json.total : results.length;
+      setCustomCheckResults(results);
+      if (results.some((item) => item.status === "error")) setCustomDeleteStatus("error");
+      else if (results.some((item) => item.status === "false")) setCustomDeleteStatus("false");
+      else setCustomDeleteStatus("true");
+      setCustomCheckProgress({ completed: total, total });
+    } catch (error) {
+      setCustomCheckError(error instanceof Error ? error.message : "Không thể custom check.");
+      setCustomCheckProgress({ completed: 0, total: 0 });
+    } finally {
+      setCustomCheckBusy(false);
+    }
+  };
+
+  const handleDeleteByCustomStatus = async () => {
+    if (customDeleteBusy || customCheckBusy) return;
+    if (!selectedProductId) return;
+
+    const targetIds = Array.from(new Set(getCustomDeleteTargetIds(customDeleteStatus)));
+    if (!targetIds.length) {
+      setCustomDeleteMessage(`Không có stock thuộc nhóm ${customDeleteStatusLabels[customDeleteStatus]} để xóa.`);
+      return;
+    }
+
+    if (
+      !confirm(
+        `Xóa ${targetIds.length.toLocaleString("vi-VN")} stock thuộc nhóm ${customDeleteStatusLabels[customDeleteStatus]}?`
+      )
+    ) {
+      return;
+    }
+
+    setCustomDeleteBusy(true);
+    setCustomDeleteMessage(null);
+    try {
+      for (let i = 0; i < targetIds.length; i += 500) {
+        const chunk = targetIds.slice(i, i + 500);
+        const { error } = await supabase.from("stock").delete().in("id", chunk);
+        if (error) throw error;
+      }
+
+      setSelectedStockIds((prev) => {
+        const next = new Set(prev);
+        for (const id of targetIds) next.delete(id);
+        return next;
+      });
+
+      setCustomCheckResults((prev) => prev.filter((item) => !targetIds.includes(item.stock_id)));
+      setCustomDeleteMessage(
+        `Đã xóa ${targetIds.length.toLocaleString("vi-VN")} stock nhóm ${customDeleteStatusLabels[customDeleteStatus]}.`
+      );
+
+      await loadStockSummary(selectedProductId);
+      await loadStock(selectedProductId, page);
+    } catch (error) {
+      setCustomDeleteMessage(
+        error instanceof Error ? error.message : "Không thể xóa stock theo nhóm kết quả."
+      );
+    } finally {
+      setCustomDeleteBusy(false);
+    }
+  };
+
   return (
     <div className="grid" style={{ gap: 24 }}>
       <div className="topbar">
@@ -436,6 +788,256 @@ export default function StockPage() {
               </p>
             )}
           </form>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 className="section-title">Custom check</h3>
+        <p className="muted" style={{ marginBottom: 12 }}>
+          Logic giống <code>@email_inbox_extension</code>: lọc theo <code>Sender</code> và <code>Subject</code>.
+        </p>
+        <div className="form-grid">
+          <div>
+            <label className="muted" style={{ display: "block", marginBottom: 6 }}>
+              Loại check
+            </label>
+            <select
+              className="select"
+              value={customCheckScope}
+              onChange={(event) => setCustomCheckScope(event.target.value as CustomCheckScope)}
+            >
+              <option value="product">Product đã chọn (tất cả stock)</option>
+              <option value="selected">Stock đã chọn trong bảng</option>
+            </select>
+          </div>
+          <div>
+            <label className="muted" style={{ display: "block", marginBottom: 6 }}>
+              Nguồn check
+            </label>
+            <select
+              className="select"
+              value={customCheckSource}
+              onChange={(event) => {
+                const value = event.target.value as CustomCheckSource;
+                setCustomCheckSource(value);
+                persistCustomCheckHistory({ source: value });
+              }}
+            >
+              {customSourceOptions.map((source) => (
+                <option key={source} value={source}>
+                  {source === "hotmail" ? "Hotmail" : source === "tempmail" ? "TempMail" : "TinyHost"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="muted" style={{ display: "block", marginBottom: 6 }}>
+              Cột Mail (phân tách dấu phẩy ,)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              className="input"
+              list="customCheckMailColumnHistoryList"
+              value={customCheckMailColumnIndex}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (!Number.isFinite(value)) return;
+                setCustomCheckMailColumnIndex(Math.max(1, Math.min(30, Math.floor(value))));
+              }}
+              onBlur={() =>
+                persistCustomCheckHistory({
+                  mailColumnIndex: customCheckMailColumnIndex
+                })
+              }
+            />
+            <datalist id="customCheckMailColumnHistoryList">
+              {customMailColumnHistory.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+          </div>
+          <div>
+            <label className="muted" style={{ display: "block", marginBottom: 6 }}>
+              Filter Sender
+            </label>
+            <input
+              className="input"
+              list="customCheckSenderHistoryList"
+              placeholder="noreply@tm.openai.com"
+              value={customCheckSenderFilter}
+              onChange={(event) => setCustomCheckSenderFilter(event.target.value)}
+              onBlur={(event) => {
+                const trimmedValue = event.target.value.trim();
+                if (trimmedValue !== customCheckSenderFilter) {
+                  setCustomCheckSenderFilter(trimmedValue);
+                }
+                persistCustomCheckHistory({ senderFilter: trimmedValue });
+              }}
+            />
+            <datalist id="customCheckSenderHistoryList">
+              {customSenderHistory.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+          </div>
+          <div>
+            <label className="muted" style={{ display: "block", marginBottom: 6 }}>
+              Filter Subject
+            </label>
+            <input
+              className="input"
+              list="customCheckSubjectHistoryList"
+              placeholder="Kế hoạch mới"
+              value={customCheckSubjectFilter}
+              onChange={(event) => setCustomCheckSubjectFilter(event.target.value)}
+              onBlur={(event) => {
+                const trimmedValue = event.target.value.trim();
+                if (trimmedValue !== customCheckSubjectFilter) {
+                  setCustomCheckSubjectFilter(trimmedValue);
+                }
+                persistCustomCheckHistory({ subjectFilter: trimmedValue });
+              }}
+            />
+            <datalist id="customCheckSubjectHistoryList">
+              {customSubjectHistory.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+          </div>
+          <div>
+            <label className="muted" style={{ display: "block", marginBottom: 6 }}>
+              Tốc độ check
+            </label>
+            <select
+              className="select"
+              value={customCheckConcurrency}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                setCustomCheckConcurrency(value);
+                persistCustomCheckHistory({ concurrency: value });
+              }}
+            >
+              {customConcurrencyOptions.map((value) => (
+                <option key={value} value={value}>
+                  {value}x
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <p className="muted" style={{ marginTop: 8 }}>
+          Ví dụ stock dạng <code>uid,email,password,...</code> thì cột mail là <code>2</code>.
+        </p>
+        <p className="muted" style={{ marginTop: 4 }}>
+          Hệ thống lưu 5 giá trị dùng gần nhất cho từng form và tự chọn giá trị mới dùng gần đây nhất khi mở lại.
+        </p>
+
+        <div className="table-actions" style={{ justifyContent: "space-between", marginTop: 12 }}>
+          <div className="muted">
+            {customCheckScope === "product"
+              ? `Sẽ check toàn bộ ${stockSummary.total.toLocaleString("vi-VN")} stock của Product đang chọn.`
+              : `Sẽ check ${selectedStockIds.size.toLocaleString("vi-VN")} stock đã chọn ở bảng.`}
+          </div>
+          <button
+            type="button"
+            className="button warning"
+            onClick={handleRunCustomCheck}
+            disabled={!selectedProductId || customCheckBusy}
+          >
+            {customCheckBusy ? "Đang check..." : "Chạy custom check"}
+          </button>
+        </div>
+
+        {customCheckProgress.total > 0 && (
+          <p className="muted" style={{ marginTop: 10 }}>
+            Tiến độ: {customCheckProgress.completed}/{customCheckProgress.total}
+          </p>
+        )}
+
+        {customCheckError && (
+          <p className="muted" style={{ marginTop: 10, color: "var(--danger)" }}>
+            {customCheckError}
+          </p>
+        )}
+
+        {customCheckResults.length > 0 && (
+          <div className="grid" style={{ gap: 12, marginTop: 12 }}>
+            <div className="grid stats">
+              <div className="card" style={{ boxShadow: "none", padding: 14 }}>
+                <p className="muted">True</p>
+                <h2>{customCheckTrueLines.length.toLocaleString("vi-VN")}</h2>
+              </div>
+              <div className="card" style={{ boxShadow: "none", padding: 14 }}>
+                <p className="muted">False</p>
+                <h2>{customCheckFalseLines.length.toLocaleString("vi-VN")}</h2>
+              </div>
+              <div className="card" style={{ boxShadow: "none", padding: 14 }}>
+                <p className="muted">Error</p>
+                <h2>{customCheckErrorLines.length.toLocaleString("vi-VN")}</h2>
+              </div>
+            </div>
+            <div className="form-grid">
+              <textarea
+                className="textarea"
+                rows={6}
+                readOnly
+                value={customCheckTrueLines.join("\n")}
+                placeholder="Danh sách True"
+              />
+              <textarea
+                className="textarea"
+                rows={6}
+                readOnly
+                value={customCheckFalseLines.join("\n")}
+                placeholder="Danh sách False"
+              />
+              <textarea
+                className="textarea"
+                rows={6}
+                readOnly
+                value={customCheckErrorLines.join("\n")}
+                placeholder="Danh sách Error"
+              />
+            </div>
+            <div className="table-actions" style={{ justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span className="muted">Xóa theo kết quả:</span>
+                <select
+                  className="select"
+                  value={customDeleteStatus}
+                  onChange={(event) => setCustomDeleteStatus(event.target.value as CustomCheckStatus)}
+                  style={{ minWidth: 180 }}
+                >
+                  <option value="true">True ({customCheckTrueResults.length})</option>
+                  <option value="false">False ({customCheckFalseResults.length})</option>
+                  <option value="error">Error ({customCheckErrorResults.length})</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                className="button danger"
+                onClick={handleDeleteByCustomStatus}
+                disabled={customDeleteBusy || customCheckBusy}
+              >
+                {customDeleteBusy ? "Đang xóa..." : "Xóa nhóm đã chọn"}
+              </button>
+            </div>
+            {customDeleteMessage && (
+              <p
+                className="muted"
+                style={{
+                  color: customDeleteMessage.startsWith("Đã xóa")
+                    ? "#20705b"
+                    : "var(--danger)"
+                }}
+              >
+                {customDeleteMessage}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
