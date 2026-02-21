@@ -11,6 +11,8 @@ const SETTINGS_KEYS = [
   "binance_pay_id",
   "admin_contact",
   "support_contacts",
+  "payment_notify_bot_token",
+  "payment_notify_user_id",
   "shop_page_size",
   "payment_mode",
   "show_shop",
@@ -123,6 +125,24 @@ export default function SettingsPage() {
             value={values.admin_contact || ""}
             onChange={(e) => updateField("admin_contact", e.target.value)}
           />
+          <div className="form-section">
+            <div className="section-title">Relay thông báo thanh toán</div>
+            <p className="muted" style={{ marginBottom: 10 }}>
+              Khi đơn thanh toán thành công, hệ thống sẽ gửi thông báo sang bot Telegram khác.
+            </p>
+            <input
+              className="input"
+              placeholder="Bot_Token nhận thông báo"
+              value={values.payment_notify_bot_token || ""}
+              onChange={(e) => updateField("payment_notify_bot_token", e.target.value)}
+            />
+            <input
+              className="input"
+              placeholder="UserID nhận thông báo (có thể âm nếu là group)"
+              value={values.payment_notify_user_id || ""}
+              onChange={(e) => updateField("payment_notify_user_id", e.target.value)}
+            />
+          </div>
           <div className="form-section">
             <div className="section-title">Liên hệ hỗ trợ</div>
             <p className="muted" style={{ marginBottom: 10 }}>

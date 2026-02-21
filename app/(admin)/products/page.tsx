@@ -520,7 +520,6 @@ export default function ProductsPage() {
           <input className="input" placeholder="Giá (VND)" value={price} onChange={(e) => setPrice(e.target.value)} required />
           <input className="input" placeholder="Giá (USDT)" value={priceUsdt} onChange={(e) => setPriceUsdt(e.target.value)} />
           <input className="input" placeholder="Vị trí trên Bot (VD: 1, 2, 3)" value={sortPosition} onChange={(e) => setSortPosition(e.target.value)} />
-          <input className="input" placeholder="Mô tả (gửi trước Account sau thanh toán)" value={description} onChange={(e) => setDescription(e.target.value)} />
           <select
             className="select"
             value=""
@@ -538,6 +537,12 @@ export default function ProductsPage() {
             placeholder="Format data (VD: Mail,Pass,Token)"
             value={formatData}
             onChange={(e) => setFormatData(e.target.value)}
+          />
+          <textarea
+            className="textarea form-section"
+            placeholder="Mô tả (gửi trước Account sau thanh toán)"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
           />
           <div className="form-section pricing-box">
             <div className="pricing-head">

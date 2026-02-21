@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { sendPaymentRelayNotification } from "@/app/api/_shared/paymentRelay";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -172,6 +173,7 @@ export async function POST(request: NextRequest) {
     .select("id, name, description, format_data")
     .eq("id", directOrder.product_id)
     .maybeSingle();
+  const productName = String(product?.name || `#${directOrder.product_id}`).trim();
 
   const bonusQuantity = Number(directOrder.bonus_quantity || 0);
   const deliverQuantity = Math.max(
@@ -233,7 +235,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to update direct order." }, { status: 500 });
   }
 
-  const productName = product?.name || `#${directOrder.product_id}`;
+  await sendPaymentRelayNotification(supabase, [
+    "✅ Thanh toán thành công (Duyệt tay Bot)",
+    `Mã đơn: ${directOrder.id}`,
+    `Mã người dùng: ${directOrder.user_id}`,
+    `Mã thanh toán: ${directOrder.code}`,
+    `Số tiền: ${totalPrice.toLocaleString("vi-VN")}đ`,
+    `Sản phẩm: ${productName}`,
+    `SL thanh toán: ${directOrder.quantity}`,
+    `SL giao: ${items.length}`,
+    `SL khuyến mãi: ${bonusQuantity}`
+  ]);
+
   const description = product?.description || "";
   const totalText = `${directOrder.amount?.toLocaleString?.() ?? directOrder.amount ?? totalPrice}đ`;
   const descriptionBlock = formatDescriptionBlock(description);
@@ -250,16 +263,16 @@ export async function POST(request: NextRequest) {
   let sent = false;
   if (items.length > 5 || messageText.length >= MAX_MESSAGE_LENGTH - 50) {
     const headerLines = [
-      `Product: ${productName}`,
-      `Qty: ${items.length}`,
-      `Paid Qty: ${directOrder.quantity}`,
-      `Total: ${totalText}`
+      `Sản phẩm: ${productName}`,
+      `Số lượng: ${items.length}`,
+      `SL thanh toán: ${directOrder.quantity}`,
+      `Tổng tiền: ${totalText}`
     ];
     if (bonusQuantity > 0) {
-      headerLines.push(`Bonus: ${bonusQuantity}`);
+      headerLines.push(`SL khuyến mãi: ${bonusQuantity}`);
     }
     if (description) {
-      headerLines.push(`Description: ${description}`);
+      headerLines.push(`Mô tả: ${description}`);
     }
     const fileItems = buildFormattedItems(items, product?.format_data, false);
     const fileContent = `${headerLines.join("\n")}\n${"=".repeat(40)}\n\n${fileItems.join("\n\n")}`;

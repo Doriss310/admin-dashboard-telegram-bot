@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { sendPaymentRelayNotification } from "@/app/api/_shared/paymentRelay";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
@@ -85,6 +86,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Order already processed." }, { status: 400 });
   }
 
+  const { data: product } = await supabase
+    .from("products")
+    .select("id, name")
+    .eq("id", directOrder.product_id)
+    .maybeSingle();
+  const productName = String(product?.name || `#${directOrder.product_id}`).trim();
+
   if (isDirectOrderExpired(directOrder.created_at)) {
     await supabase
       .from("website_direct_orders")
@@ -168,6 +176,20 @@ export async function POST(request: NextRequest) {
   if (updateDirectOrderError) {
     return NextResponse.json({ error: "Failed to update website direct order." }, { status: 500 });
   }
+
+  await sendPaymentRelayNotification(supabase, [
+    "✅ Thanh toán thành công (Duyệt tay Website)",
+    `Mã direct order: ${directOrder.id}`,
+    `Mã website order: ${fulfilledOrderId ?? "-"}`,
+    `Mã thanh toán: ${directOrder.code}`,
+    `Số tiền: ${totalPrice.toLocaleString("vi-VN")}đ`,
+    `Mã user website: ${directOrder.auth_user_id ?? "-"}`,
+    `Email user: ${directOrder.user_email ?? "-"}`,
+    `Sản phẩm: ${productName}`,
+    `SL thanh toán: ${directOrder.quantity}`,
+    `SL giao: ${items.length}`,
+    `SL khuyến mãi: ${bonusQuantity}`
+  ]);
 
   return NextResponse.json({
     success: true,
